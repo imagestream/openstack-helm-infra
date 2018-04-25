@@ -142,13 +142,11 @@ network:
       enabled: false
       port: 30903
 
-storage:
+volume:
+  chown_on_start: true
   enabled: true
-  pvc:
-    access_mode: [ "ReadWriteOnce" ]
-  requests:
-    storage: 5Gi
-  storage_class: general
+  class_name: general
+  size: 5Gi
 
 manifests:
   clusterrolebinding: true
