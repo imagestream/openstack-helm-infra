@@ -24,7 +24,7 @@ images:
     elasticsearch: docker.io/elasticsearch:5.6.4
     helm_tests: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
     prometheus_elasticsearch_exporter: docker.io/justwatch/elasticsearch_exporter:1.0.1
-    dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.0
+    dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
     snapshot_repository: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
@@ -106,6 +106,13 @@ pod:
       elasticsearch:
   resources:
     enabled: false
+    apache_proxy:
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
     client:
       requests:
         memory: "128Mi"
@@ -170,8 +177,8 @@ secrets:
 
 conf:
   apache:
-    htpasswd: /usr/local/apache2/conf/.htpasswd
-  httpd:
+    httpd: null
+    elasticsearch_host: null
   init:
     max_map_count: 262144
   curator:
@@ -370,6 +377,22 @@ endpoints:
     port:
       metrics:
         default: 9108
+  ldap:
+    hosts:
+      default: ldap
+    auth:
+      admin:
+        bind: "cn=admin,dc=cluster,dc=local"
+        password: password
+    host_fqdn_override:
+      default: null
+    path:
+      default: "/ou=People,dc=cluster,dc=local"
+    scheme:
+      default: ldap
+    port:
+      ldap:
+        default: 389
 
 monitoring:
   prometheus:

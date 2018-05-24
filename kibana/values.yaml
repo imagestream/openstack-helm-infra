@@ -24,7 +24,7 @@ images:
   tags:
     apache_proxy: docker.io/httpd:2.4
     kibana: docker.io/kibana:5.6.4
-    dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.0
+    dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: IfNotPresent
   local_registry:
@@ -51,8 +51,15 @@ pod:
   replicas:
     kibana: 1
   resources:
+    enabled: false
+    apache_proxy:
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
     kibana:
-      enabled: false
       requests:
         memory: "128Mi"
         cpu: "100m"
@@ -93,8 +100,8 @@ dependencies:
 
 conf:
   apache:
-    htpasswd: /usr/local/apache2/conf/.htpasswd
-  httpd:
+    httpd: null
+    kibana_host: null
   kibana:
     elasticsearch:
       pingTimeout: 1500
@@ -168,6 +175,22 @@ endpoints:
         default: 5601
       http:
         default: 80
+  ldap:
+    hosts:
+      default: ldap
+    auth:
+      admin:
+        bind: "cn=admin,dc=cluster,dc=local"
+        password: password
+    host_fqdn_override:
+      default: null
+    path:
+      default: "/ou=People,dc=cluster,dc=local"
+    scheme:
+      default: ldap
+    port:
+      ldap:
+        default: 389
 
 network:
   kibana:
