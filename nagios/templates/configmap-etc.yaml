@@ -29,4 +29,5 @@ data:
 {{- tuple "hostgroup" .Values.conf.nagios.host_groups | include "nagios.object_definition" | indent 4 }}
 {{- tuple "command" .Values.conf.nagios.commands | include "nagios.object_definition" | indent 4 }}
 {{- tuple "service" .Values.conf.nagios.services | include "nagios.object_definition" | indent 4 }}
+{{- tuple "contact" .Values.conf.nagios.contacts | include "nagios.object_definition" | indent 4 }}
 {{- end }}

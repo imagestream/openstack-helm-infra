@@ -18,7 +18,7 @@
 
 images:
   tags:
-    grafana: docker.io/grafana/grafana:4.5.2
+    grafana: docker.io/grafana/grafana:5.1.2
     datasource: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.0
     db_init: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
@@ -285,6 +285,10 @@ conf:
     paths:
       data: /var/lib/grafana/data
       plugins: /var/lib/grafana/plugins
+    smtp:
+      enabled: true
+      host: smtp.imagestream.com:587
+      from_address: support@imagestream.com
     server:
       protocol: http
       http_port: 3000
