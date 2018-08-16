@@ -88,17 +88,50 @@ conf:
   policy:
     - resource:
         verbs:
+          - "*"
+        resources:
+          - "*"
+        namespace: "*"
+        version: "*"
+      match:
+        - type: role
+          values:
+            - admin
+    - resource:
+        verbs:
+          - "*"
+        resources:
+          - "*"
+        namespace: "kube-system"
+        version: "*"
+      match:
+        - type: role
+          values:
+            - kube-system-admin
+    - resource:
+        verbs:
           - get
           - list
           - watch
         resources:
-          - pods
-        namespace: openstack
+          - "*"
+        namespace: "kube-system"
         version: "*"
       match:
-        - type: user
+        - type: role
           values:
-            - admin
+            - kube-system-viewer
+    - resource:
+        verbs:
+          - "*"
+        resources:
+          - "*"
+        namespace: "openstack"
+        version: "*"
+      match:
+        - type: project
+          values:
+            - openstack-system
 
 secrets:
   identity:
@@ -126,8 +159,8 @@ endpoints:
         user_domain_name: default
         project_domain_name: default
     hosts:
-      default: keystone-api
-      public: keystone
+      default: keystone
+      internal: keystone-api
     host_fqdn_override:
       default: null
     path:
@@ -135,10 +168,9 @@ endpoints:
     scheme:
       default: http
     port:
-      admin:
-        default: 35357
       api:
         default: 80
+        internal: 5000
   kubernetes_keystone_webhook:
     namespace: null
     name: k8sksauth

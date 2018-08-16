@@ -19,7 +19,7 @@
 images:
   tags:
     apache_proxy: docker.io/httpd:2.4
-    nagios: quay.io/attcomdev/nagios:8ed23ede915ccf23aacd370953291090007ed16d
+    nagios: quay.io/attcomdev/nagios:f5aac039c8e39efe467ac950936773a523bd7cb3
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.2.1
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: IfNotPresent
@@ -56,6 +56,10 @@ dependencies:
 secrets:
   nagios:
     admin: nagios-admin-creds
+  tls:
+    nagios:
+      nagios:
+        public: nagios-tls-public
 
 endpoints:
   cluster_domain_suffix: cluster.local
@@ -73,6 +77,10 @@ endpoints:
         node: 5000
   monitoring:
     name: prometheus
+    auth:
+      admin:
+        username: admin
+        password: changeme
     hosts:
       default: prom-metrics
       public: prometheus
@@ -83,17 +91,27 @@ endpoints:
     scheme:
       default: http
     port:
-      api:
-        default: 9090
-        public: 80
+      http:
+        default: 80
   nagios:
     name: nagios
     namespace: null
+    auth:
+      admin:
+        username: nagiosadmin
+        password: password
     hosts:
       default: nagios-metrics
       public: nagios
     host_fqdn_override:
       default: null
+      # NOTE(srwilkers): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: null
     scheme:
@@ -178,13 +196,106 @@ manifests:
   ingress: true
   job_image_repo_sync: true
   secret_nagios: true
+  secret_ingress_tls: true
   service: true
   service_ingress: true
 
 conf:
-  apache:
-    httpd: null
-    elasticsearch_host: null
+  httpd: |
+    ServerRoot "/usr/local/apache2"
+
+    Listen 80
+
+    LoadModule mpm_event_module modules/mod_mpm_event.so
+    LoadModule authn_file_module modules/mod_authn_file.so
+    LoadModule authn_core_module modules/mod_authn_core.so
+    LoadModule authz_host_module modules/mod_authz_host.so
+    LoadModule authz_groupfile_module modules/mod_authz_groupfile.so
+    LoadModule authz_user_module modules/mod_authz_user.so
+    LoadModule authz_core_module modules/mod_authz_core.so
+    LoadModule access_compat_module modules/mod_access_compat.so
+    LoadModule auth_basic_module modules/mod_auth_basic.so
+    LoadModule ldap_module modules/mod_ldap.so
+    LoadModule authnz_ldap_module modules/mod_authnz_ldap.so
+    LoadModule reqtimeout_module modules/mod_reqtimeout.so
+    LoadModule filter_module modules/mod_filter.so
+    LoadModule proxy_html_module modules/mod_proxy_html.so
+    LoadModule log_config_module modules/mod_log_config.so
+    LoadModule env_module modules/mod_env.so
+    LoadModule headers_module modules/mod_headers.so
+    LoadModule setenvif_module modules/mod_setenvif.so
+    LoadModule version_module modules/mod_version.so
+    LoadModule proxy_module modules/mod_proxy.so
+    LoadModule proxy_connect_module modules/mod_proxy_connect.so
+    LoadModule proxy_http_module modules/mod_proxy_http.so
+    LoadModule proxy_balancer_module modules/mod_proxy_balancer.so
+    LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
+    LoadModule slotmem_plain_module modules/mod_slotmem_plain.so
+    LoadModule unixd_module modules/mod_unixd.so
+    LoadModule status_module modules/mod_status.so
+    LoadModule autoindex_module modules/mod_autoindex.so
+
+    <IfModule unixd_module>
+    User daemon
+    Group daemon
+    </IfModule>
+
+    <Directory />
+        AllowOverride none
+        Require all denied
+    </Directory>
+
+    <Files ".ht*">
+        Require all denied
+    </Files>
+
+    ErrorLog /dev/stderr
+
+    LogLevel warn
+
+    <IfModule log_config_module>
+        LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%h %l %u %t \"%r\" %>s %b" common
+
+        <IfModule logio_module>
+          LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+        </IfModule>
+
+        CustomLog /dev/stdout common
+
+        CustomLog /dev/stdout combined
+    </IfModule>
+
+    <Directory "/usr/local/apache2/cgi-bin">
+        AllowOverride None
+        Options None
+        Require all granted
+    </Directory>
+
+    <IfModule headers_module>
+        RequestHeader unset Proxy early
+    </IfModule>
+
+    <IfModule proxy_html_module>
+    Include conf/extra/proxy-html.conf
+    </IfModule>
+
+    <VirtualHost *:80>
+      <Location />
+          ProxyPass http://localhost:{{ tuple "nagios" "internal" "nagios" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
+          ProxyPassReverse http://localhost:{{ tuple "nagios" "internal" "nagios" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
+      </Location>
+      <Proxy *>
+          AuthName "Nagios"
+          AuthType Basic
+          AuthBasicProvider file ldap
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
+          AuthLDAPBindDN {{ .Values.endpoints.ldap.auth.admin.bind }}
+          AuthLDAPBindPassword {{ .Values.endpoints.ldap.auth.admin.password }}
+          AuthLDAPURL {{ tuple "ldap" "default" "ldap" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | quote }}
+          Require valid-user
+      </Proxy>
+    </VirtualHost>
   nagios:
     contacts:
       - notifying_contact:
@@ -373,6 +484,12 @@ conf:
           hostgroup_name: prometheus-hosts
           service_description: "Deployment_replicas-unavailable"
           check_command: check_prom_alert!deployment_replicas_unavailable!CRITICAL- Deployment {deployment} has less than desired replicas!OK- All deployments have desired replicas
+          check_interval: 60
+      - check_volume_claim_high_utilization:
+          use: notifying_service
+          hostgroup_name: prometheus-hosts
+          service_description: "Volume_claim_high_utilization"
+          check_command: check_prom_alert!volume_claim_capacity_high_utilization!CRITICAL- Volume claim {persistentvolumeclaim} has exceed 80% utilization!OK- All volume claims less than 80% utilization
           check_interval: 60
       - check_deployment_rollingupdate_replicas_unavailable:
           use: notifying_service
@@ -750,7 +867,7 @@ conf:
           service_description: NTP_sync
           check_command: check_ntp_sync
           hostgroup_name: base-os
-    config:
+    nagios:
       log_file: /opt/nagios/var/nagios.log
       cfg_file:
         - /opt/nagios/etc/nagios_objects.cfg
@@ -856,6 +973,31 @@ conf:
       max_debug_file_size: 1000000
       allow_empty_hostgroup_assignment: 1
       illegal_macro_output_chars: "`~$&|'<>\""
+    cgi:
+      main_config_file: /opt/nagios/etc/nagios.cfg
+      physical_html_path: /opt/nagios/share
+      url_html_path: /nagios
+      show_context_help: 0
+      use_pending_states: 1
+      use_authentication: 0
+      use_ssl_authentication: 0
+      authorized_for_system_information: "*"
+      authorized_for_configuration_information: "*"
+      authorized_for_system_commands: nagiosadmin
+      authorized_for_all_services: "*"
+      authorized_for_all_hosts: "*"
+      authorized_for_all_service_commands: "*"
+      authorized_for_all_host_commands: "*"
+      default_statuswrl_layout: 4
+      ping_syntax: /bin/ping -n -U -c 5 $HOSTADDRESS$
+      refresh_rate: 90
+      result_limit: 100
+      escape_html_tags: 1
+      action_url_target: _blank
+      notes_url_target: _blank
+      lock_author_names: 1
+      navbar_search_for_addresses: 1
+      navbar_search_for_aliases: 1
     notification:
       snmp:
         primary_target: 127.0.0.1:15162

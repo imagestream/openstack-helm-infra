@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */}}
 
-{{- if .Values.manifests.job_elasticsearch_template }}
+{{- if and (.Values.manifests.job_elasticsearch_template) (not (empty .Values.conf.templates)) }}
 {{- $envAll := . }}
 {{- $esUserSecret := .Values.secrets.elasticsearch.user }}
 {{- $mounts_elasticsearch_template := .Values.pod.mounts.elasticsearch_template.elasticsearch_template }}
@@ -36,7 +36,7 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       restartPolicy: OnFailure
       nodeSelector:
-        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value }}
+        {{ .Values.labels.job.node_selector_key }}: {{ .Values.labels.job.node_selector_value | quote }}
       initContainers:
 {{ tuple $envAll "elasticsearch_template" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
@@ -65,10 +65,12 @@ spec:
               mountPath: /tmp/create_template.sh
               subPath: create_template.sh
               readOnly: true
+            {{ range $template, $fields := .Values.conf.templates }}
             - name: fluent-logging-etc
-              mountPath: /tmp/template.xml.raw
-              subPath: template.xml.raw
+              mountPath: /tmp/{{$template}}.json
+              subPath: {{$template}}.json
               readOnly: true
+            {{ end }}
 {{ if $mounts_elasticsearch_template.volumeMounts }}{{ toYaml $mounts_elasticsearch_template.volumeMounts | indent 12 }}{{ end }}
       volumes:
         - name: fluent-logging-bin

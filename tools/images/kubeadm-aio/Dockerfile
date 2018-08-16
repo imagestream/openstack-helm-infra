@@ -28,7 +28,7 @@ RUN sed -i \
         /etc/apt/sources.list ;\
     echo "APT::Get::AllowUnauthenticated \"${ALLOW_UNAUTHENTICATED}\";" > /etc/apt/apt.conf.d/allow-unathenticated
 
-ARG KUBE_VERSION="v1.10.2"
+ARG KUBE_VERSION="v1.10.6"
 ENV KUBE_VERSION ${KUBE_VERSION}
 
 ARG CNI_VERSION="v0.6.0"
@@ -70,7 +70,12 @@ RUN set -ex ;\
     hash -r ;\
     pip --no-cache-dir install setuptools ;\
     pip --no-cache-dir install kubernetes ;\
-    pip --no-cache-dir install ansible ;\
+
+    # NOTE(srwilkers): Pinning ansible to 2.5.5, as pip installs 2.6 by default.
+    # 2.6 introduces a new command flag (init) for the docker_container module
+    # that is incompatible with what we have currently. 2.5.5 ensures we match
+    # what's deployed in the gates
+    pip --no-cache-dir install "ansible==2.5.5" ;\
     for BINARY in kubectl kubeadm; do \
       curl -sSL -o /usr/bin/${BINARY} \
         https://storage.googleapis.com/kubernetes-release/release/${KUBE_VERSION}/bin/linux/amd64/${BINARY} ;\

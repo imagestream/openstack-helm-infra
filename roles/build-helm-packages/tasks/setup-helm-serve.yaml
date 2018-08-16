@@ -63,6 +63,7 @@
         state: restarted
         daemon_reload: yes
         name: helm-serve
+        enabled: yes
     - name: wait for helm server to be ready
       shell: curl -s 127.0.0.1:8879 | grep -q 'Helm Repository'
       args:
@@ -79,7 +80,7 @@
         executable: /bin/bash
       register: helm_stable_repo_present
       ignore_errors: True
-    - name: checking if helm 'stable' repo is present
+    - name: remove helm 'stable' repo when exists
       when: helm_stable_repo_present is succeeded
       command: helm repo remove stable
 

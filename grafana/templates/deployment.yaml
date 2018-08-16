@@ -22,12 +22,17 @@ limitations under the License.
 {{- $serviceAccountName := "grafana" }}
 {{ tuple $envAll "grafana" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
+  labels:
+{{ tuple $envAll "grafana" "dashboard" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
   replicas: {{ .Values.pod.replicas.grafana }}
+  selector:
+    matchLabels:
+{{ tuple $envAll "grafana" "dashboard" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 6 }}
 {{ tuple $envAll | include "helm-toolkit.snippets.kubernetes_upgrades_deployment" | indent 2 }}
   template:
     metadata:
@@ -39,7 +44,7 @@ spec:
     spec:
       serviceAccountName: {{ $serviceAccountName }}
       nodeSelector:
-        {{ .Values.labels.grafana.node_selector_key }}: {{ .Values.labels.grafana.node_selector_value }}
+        {{ .Values.labels.grafana.node_selector_key }}: {{ .Values.labels.grafana.node_selector_value | quote }}
       initContainers:
 {{ tuple $envAll "grafana" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container"  | indent 8 }}
       containers:
@@ -75,16 +80,16 @@ spec:
             - name: pod-etc-grafana
               mountPath: /etc/grafana
             - name: pod-provisioning-grafana
-              mountPath: /var/lib/grafana/provisioning
+              mountPath: {{ .Values.conf.grafana.paths.provisioning }}
             - name: grafana-bin
               mountPath: /tmp/grafana.sh
               subPath: grafana.sh
               readOnly: true
             - name: grafana-etc
-              mountPath: /var/lib/grafana/provisioning/dashboards/dashboards.yaml
+              mountPath: {{ .Values.conf.grafana.paths.provisioning }}/dashboards/dashboards.yaml
               subPath: dashboards.yaml
             - name: grafana-etc
-              mountPath: /var/lib/grafana/provisioning/datasources/datasources.yaml
+              mountPath: {{ .Values.conf.grafana.paths.provisioning }}/datasources/datasources.yaml
               subPath: datasources.yaml
             - name: grafana-etc
               mountPath: /etc/grafana/grafana.ini

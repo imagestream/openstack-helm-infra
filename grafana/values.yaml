@@ -179,6 +179,13 @@ endpoints:
       public: grafana
     host_fqdn_override:
       default: null
+      # NOTE(srwilkers): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: null
     scheme:
@@ -190,6 +197,10 @@ endpoints:
   monitoring:
     name: prometheus
     namespace: null
+    auth:
+      user:
+        username: admin
+        password: changeme
     hosts:
       default: prom-metrics
       public: prometheus
@@ -201,18 +212,19 @@ endpoints:
       default: http
     port:
       api:
-        default: 9090
+        default: 80
         public: 80
   ldap:
     hosts:
       default: ldap
     auth:
       admin:
+        bind_dn: "cn=admin,dc=cluster,dc=local"
         password: password
     host_fqdn_override:
       default: null
     path:
-      default: "/ou=People,dc=cluster,dc=local"
+      default: "ou=People,dc=cluster,dc=local"
     scheme:
       default: ldap
     port:
@@ -279,6 +291,12 @@ secrets:
   oslo_db_session:
     admin: grafana-session-db-admin
     user: grafana-session-db-user
+  tls:
+    grafana:
+      grafana:
+        public: grafana-tls-public
+  prometheus:
+    user: prometheus-user-creds
 
 manifests:
   configmap_bin: true
@@ -294,39 +312,45 @@ manifests:
   secret_db: true
   secret_db_session: true
   secret_admin_creds: true
+  secret_ingress_tls: true
+  secret_prom_creds: true
   service: true
   service_ingress: true
 
 conf:
-  ldap: |
-    verbose_logging = true
-
-    [[servers]]
-    host = "ldap.openstack.svc.cluster.local"
-    port = 389
-    use_ssl = false
-    start_tls = false
-    ssl_skip_verify = false
-    bind_dn = "cn=admin,dc=cluster,dc=local"
-    bind_password = 'password'
-    search_filter = "(uid=%s)"
-    search_base_dns = ["dc=cluster,dc=local"]
-    group_search_filter = "(&(objectclass=posixGroup)(memberUID=uid=%s,ou=People,dc=cluster,dc=local))"
-    group_search_base_dns = ["ou=Groups,dc=cluster,dc=local"]
-
-    [servers.attributes]
-    username = "uid"
-    surname = "sn"
-    member_of = "cn"
-    email = "mail"
-
-    [[servers.group_mappings]]
-    group_dn = "cn=admin,dc=cluster,dc=local"
-    org_role = "Admin"
-
-    [[servers.group_mappings]]
-    group_dn = "*"
-    org_role = "Editor"
+  ldap:
+    config:
+      base_dns:
+        search: "dc=cluster,dc=local"
+        group_search: "ou=Groups,dc=cluster,dc=local"
+      filters:
+        search: "(uid=%s)"
+        group_search: "(&(objectclass=posixGroup)(memberUID=uid=%s,ou=People,dc=cluster,dc=local))"
+    template: |
+      verbose_logging = false
+      [[servers]]
+      host = "{{ tuple "ldap" "internal" . | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}"
+      port = {{ tuple "ldap" "internal" "ldap" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+      use_ssl = false
+      start_tls = false
+      ssl_skip_verify = false
+      bind_dn = "{{ .Values.endpoints.ldap.auth.admin.bind_dn }}"
+      bind_password = '{{ .Values.endpoints.ldap.auth.admin.password }}'
+      search_filter = "{{ .Values.conf.ldap.config.filters.search }}"
+      search_base_dns = ["{{ .Values.conf.ldap.config.base_dns.search }}"]
+      group_search_filter = "{{ .Values.conf.ldap.config.filters.group_search }}"
+      group_search_base_dns = ["{{ .Values.conf.ldap.config.base_dns.group_search }}"]
+      [servers.attributes]
+      username = "uid"
+      surname = "sn"
+      member_of = "cn"
+      email = "mail"
+      [[servers.group_mappings]]
+      group_dn = "{{.Values.endpoints.ldap.auth.admin.bind_dn }}"
+      org_role = "Admin"
+      [[servers.group_mappings]]
+      group_dn = "*"
+      org_role = "Viewer"
   provisioning:
     dashboards:
       apiVersion: 1
@@ -340,17 +364,17 @@ conf:
         options:
           path: /var/lib/grafana/dashboards
     datasources:
-      apiVersion: 1
-      datasources:
-      - name: prometheus
+      #NOTE(srwilkers): The top key for each datasource (eg: monitoring) must
+      # map to the key name for the datasource's endpoint entry in the endpoints
+      # tree
+      monitoring:
+        name: prometheus
         type: prometheus
         access: proxy
         orgId: 1
         editable: true
-        url: 'http://prom-metrics.openstack.svc.cluster.local:9090'
+        basicAuth: true
   grafana:
-    auth.basic:
-      enabled: true
     auth.ldap:
       enabled: true
       config_file: /etc/grafana/ldap.toml
@@ -3584,7 +3608,7 @@ conf:
             refId: A
             step: 60
           thresholds: '70,80'
-          title: Available Capacity
+          title: Current Utilization
           transparent: false
           type: singlestat
           valueFontSize: 100%
@@ -5311,7 +5335,7 @@ conf:
             lineColor: rgb(31, 120, 193)
             show: false
           targets:
-          - expr: (ceph_pool_bytes_used{pool_id=~"$pool"} / ceph_pool_max_avail{pool_id=~"$pool"}) * 100
+          - expr: (ceph_pool_bytes_used{pool_id=~"$pool"} / ceph_pool_max_avail{pool_id=~"$pool"})
             interval: "$interval"
             intervalFactor: 1
             refId: A

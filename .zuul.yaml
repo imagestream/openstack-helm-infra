@@ -26,12 +26,6 @@
               - ^.*\.rst$
               - ^doc/.*$
               - ^releasenotes/.*$
-        - openstack-helm-infra-fedora:
-            voting: false
-            irrelevant-files:
-              - ^.*\.rst$
-              - ^doc/.*$
-              - ^releasenotes/.*$
         - openstack-helm-infra-dev-deploy:
             irrelevant-files:
               - ^.*\.rst$
@@ -65,12 +59,24 @@
               - ^.*\.rst$
               - ^doc/.*$
               - ^releasenotes/.*$
+    experimental:
+      jobs:
+        #NOTE(srwilkers): Make fedora job experimental until issues resolved
+        - openstack-helm-infra-fedora:
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
 
 - nodeset:
     name: openstack-helm-single-node
     nodes:
       - name: primary
         label: ubuntu-xenial
+    groups:
+      - name: primary
+        nodes:
+          - primary
 
 - nodeset:
     name: openstack-helm-ubuntu
@@ -112,11 +118,11 @@
     name: openstack-helm-fedora
     nodes:
       - name: primary
-        label: fedora-27
+        label: fedora-latest
       - name: node-1
-        label: fedora-27
+        label: fedora-latest
       - name: node-2
-        label: fedora-27
+        label: fedora-latest
     groups:
       - name: primary
         nodes:
@@ -179,15 +185,15 @@
     name: openstack-helm-five-node-fedora
     nodes:
       - name: primary
-        label: fedora-27
+        label: fedora-latest
       - name: node-1
-        label: fedora-27
+        label: fedora-latest
       - name: node-2
-        label: fedora-27
+        label: fedora-latest
       - name: node-3
-        label: fedora-27
+        label: fedora-latest
       - name: node-4
-        label: fedora-27
+        label: fedora-latest
     groups:
       - name: primary
         nodes:
@@ -258,6 +264,7 @@
     vars:
       zuul_osh_relative_path: ../openstack-helm/
       kubernetes_keystone_auth: true
+      gate_fqdn_test: true
     parent: openstack-helm-infra
     nodeset: openstack-helm-single-node
     run: playbooks/osh-infra-keystone-k8s-auth.yaml

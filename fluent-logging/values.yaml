@@ -103,7 +103,7 @@ conf:
   fluentbit:
     - service:
         header: service
-        Flush: 5
+        Flush: 30
         Daemon: Off
         Log_Level: info
         Parsers_File: parsers.conf
@@ -115,6 +115,9 @@ conf:
         Parser: docker
         DB: /var/log/flb_kube.db
         Mem_Buf_Limit: 5MB
+        DB.Sync: Normal
+        Buffer_Chunk_Size: 1M
+        Buffer_Max_Size: 1M
     - kube_filter:
         header: filter
         Name: kubernetes
@@ -161,55 +164,56 @@ conf:
         max_retry_wait: 300
         disable_retry_limit: ""
         num_threads: 8
-        type_name: fluentd
+        type_name: fluent
   fluentd_exporter:
     log:
       format: "logger:stdout?json=true"
       level: "info"
-  template:
-    template: "logstash-*"
-    index_patterns: "logstash-*"
-    settings:
-      number_of_shards: 1
-    mappings:
-      doc:
-        properties:
-          kubernetes:
-            properties:
-              container_name:
-                type: keyword
-                index: false
-              docker_id:
-                type: keyword
-                index: false
-              host:
-                type: keyword
-                index: false
-              labels:
-                properties:
-                  app:
-                    type: keyword
-                    index: false
-                  application:
-                    type: keyword
-                    index: false
-                  component:
-                    type: keyword
-                    index: false
-                  release_group:
-                    type: keyword
-                    index: false
-              namespace_name:
-                type: keyword
-                index: false
-              pod_id:
-                type: keyword
-                index: false
-              pod_name:
-                type: keyword
-                index: false
-          log:
-            type: text
+  templates:
+    fluent:
+      template: "logstash-*"
+      index_patterns: "logstash-*"
+      settings:
+        number_of_shards: 1
+      mappings:
+        fluent:
+          properties:
+            kubernetes:
+              properties:
+                container_name:
+                  type: keyword
+                  index: false
+                docker_id:
+                  type: keyword
+                  index: false
+                host:
+                  type: keyword
+                  index: false
+                labels:
+                  properties:
+                    app:
+                      type: keyword
+                      index: false
+                    application:
+                      type: keyword
+                      index: false
+                    component:
+                      type: keyword
+                      index: false
+                    release_group:
+                      type: keyword
+                      index: false
+                namespace_name:
+                  type: keyword
+                  index: false
+                pod_id:
+                  type: keyword
+                  index: false
+                pod_name:
+                  type: keyword
+                  index: false
+            log:
+              type: text
 
 endpoints:
   cluster_domain_suffix: cluster.local
@@ -333,8 +337,8 @@ pod:
     fluentd: 3
     prometheus_fluentd_exporter: 1
   resources:
+    enabled: false
     fluentbit:
-      enabled: false
       limits:
         memory: '400Mi'
         cpu: '400m'
@@ -342,7 +346,6 @@ pod:
         memory: '100Mi'
         cpu: '100m'
     fluentd:
-      enabled: false
       limits:
         memory: '1024Mi'
         cpu: '2000m'
