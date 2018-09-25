@@ -131,6 +131,8 @@ spec:
               value: ".{{ tuple "oslo_messaging" "discovery" . | include "helm-toolkit.endpoints.hostname_fqdn_endpoint_lookup" }}"
             - name: RABBITMQ_ERLANG_COOKIE
               value: "{{ $envAll.Values.endpoints.oslo_messaging.auth.erlang_cookie }}"
+            - name: RABBITMQ_IO_THREAD_POOL_SIZE
+              value: "{{ $envAll.Values.conf.rabbitmq_env.rabbitmq_io_thread_pool_size }}"
           readinessProbe:
             initialDelaySeconds: 10
             timeoutSeconds: 10

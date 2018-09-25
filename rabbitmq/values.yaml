@@ -108,6 +108,8 @@ conf:
       - no_sort
     log_level: info
     skipverify: 1
+  rabbitmq_env:
+    rabbitmq_io_thread_pool_size: 64
   rabbitmq:
     listeners:
       tcp:
