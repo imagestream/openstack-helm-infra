@@ -19,7 +19,7 @@ Communication
 * Join us on `IRC <irc://chat.freenode.net:6697/openstack-helm>`_:
   #openstack-helm on freenode
 * Community IRC Meetings: [Every Tuesday @ 3PM UTC],
-  #openstack-meeting-5 on freenode
+  #openstack-meeting-4 on freenode
 * Meeting Agenda Items: `Agenda
   <https://etherpad.openstack.org/p/openstack-helm-meeting-agenda>`_
 
@@ -30,5 +30,5 @@ Bugs and blueprints are tracked via OpenStack-Helm's Launchpad.  Any bugs or
 blueprints filed in the OpenStack-Helm-Infra Launchpad will be closed and
 requests will be made to file them in the appropriate location.
 
-* `Bugs <https://bugs.launchpad.net/openstack-helm>`_
+* `Bugs <https://storyboard.openstack.org/#!/project/openstack/openstack-helm-infra>`_
 * `Blueprints <https://blueprints.launchpad.net/openstack-helm>`_

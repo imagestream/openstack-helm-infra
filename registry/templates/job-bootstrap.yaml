@@ -18,13 +18,15 @@ limitations under the License.
 {{- $envAll := . }}
 {{- if .Values.bootstrap.enabled }}
 
-{{- $serviceAccountName := "docker-bootstrap"}}
+{{- $serviceAccountName := "docker-bootstrap" }}
 {{ tuple $envAll "bootstrap" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: docker-bootstrap
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   template:
     metadata:
@@ -49,6 +51,8 @@ spec:
           command:
             - /tmp/bootstrap.sh
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: registry-bin
               mountPath: /tmp/bootstrap.sh
               subPath: bootstrap.sh
@@ -56,6 +60,8 @@ spec:
             - name: docker-socket
               mountPath: /var/run/docker.sock
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: registry-bin
           configMap:
             name: registry-bin

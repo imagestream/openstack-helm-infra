@@ -18,7 +18,7 @@ SHELL := /bin/bash
 HELM := helm
 TASK := build
 
-EXCLUDES := helm-toolkit doc tests tools logs tmp roles playbooks
+EXCLUDES := helm-toolkit doc tests tools logs tmp roles playbooks releasenotes zuul.d
 CHARTS := helm-toolkit $(filter-out $(EXCLUDES), $(patsubst %/.,%,$(wildcard */.)))
 
 .PHONY: $(EXCLUDES) $(CHARTS)
@@ -32,7 +32,7 @@ $(CHARTS):
 
 init-%:
 	if [ -f $*/Makefile ]; then make -C $*; fi
-	if [ -f $*/requirements.yaml ]; then helm dep up $*; fi
+	if [ -f $*/requirements.yaml ]; then $(HELM) dep up $*; fi
 
 lint-%: init-%
 	if [ -d $* ]; then $(HELM) lint $*; fi

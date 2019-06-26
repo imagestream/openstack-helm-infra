@@ -20,8 +20,8 @@
 images:
   tags:
     apache_proxy: docker.io/httpd:2.4
-    prometheus: docker.io/prom/prometheus:v2.0.0
-    helm_tests: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    prometheus: docker.io/prom/prometheus:v2.3.2
+    helm_tests: docker.io/openstackhelm/heat:newton-ubuntu_xenial
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: IfNotPresent
@@ -38,14 +38,33 @@ labels:
   job:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
+  test:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
 
 pod:
+  security_context:
+    api:
+      pod:
+        runAsUser: 65534
+      container:
+        prometheus_perms:
+          runAsUser: 0
+          readOnlyRootFilesystem: false
+        apache_proxy:
+          runAsUser: 0
+          readOnlyRootFilesystem: false
+        prometheus:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   mounts:
     prometheus:
       prometheus:
@@ -181,6 +200,10 @@ dependencies:
           service: local_image_registry
     prometheus:
       services: null
+    tests:
+      services:
+        - endpoint: internal
+          service: monitoring
 
 monitoring:
   prometheus:
@@ -197,9 +220,21 @@ network:
         cluster: "nginx-cluster"
       annotations:
         nginx.ingress.kubernetes.io/rewrite-target: /
+        nginx.ingress.kubernetes.io/affinity: cookie
+        nginx.ingress.kubernetes.io/session-cookie-name: kube-ingress-session-prometheus
+        nginx.ingress.kubernetes.io/session-cookie-hash: sha1
+        nginx.ingress.kubernetes.io/session-cookie-expires: "600"
+        nginx.ingress.kubernetes.io/session-cookie-max-age: "600"
     node_port:
       enabled: false
       port: 30900
+
+network_policy:
+  prometheus:
+    ingress:
+      - {}
+    egress:
+      - {}
 
 secrets:
   tls:
@@ -224,6 +259,7 @@ manifests:
   ingress: true
   helm_tests: true
   job_image_repo_sync: true
+  network_policy: true
   secret_ingress_tls: true
   secret_prometheus: true
   service_ingress: true
@@ -284,16 +320,18 @@ conf:
     LogLevel warn
 
     <IfModule log_config_module>
-        LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" proxy
         LogFormat "%h %l %u %t \"%r\" %>s %b" common
 
         <IfModule logio_module>
-          LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+          LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
         </IfModule>
 
+        SetEnvIf X-Forwarded-For "^.*\..*\..*\..*" forwarded
         CustomLog /dev/stdout common
-
         CustomLog /dev/stdout combined
+        CustomLog /dev/stdout proxy env=forwarded
     </IfModule>
 
     <Directory "/usr/local/apache2/cgi-bin">
@@ -346,6 +384,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       <Location /api/v1/status/config>
@@ -354,6 +393,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       # Restrict access to the /flags (dashboard) and /api/v1/status/flags (http) endpoints
@@ -364,6 +404,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       <Location /api/v1/status/flags>
@@ -372,6 +413,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       # Restrict access to the /status (dashboard) endpoint to the admin user
@@ -381,6 +423,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       # Restrict access to the /rules (dashboard) endpoint to the admin user
@@ -390,6 +433,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       # Restrict access to the /targets (dashboard) and /api/v1/targets (http) endpoints
@@ -400,6 +444,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       <Location /api/v1/targets>
@@ -408,6 +453,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
       # Restrict access to the /api/v1/admin/tsdb/ endpoints (http) to the admin user.
@@ -419,6 +465,7 @@ conf:
           AuthName "Prometheus"
           AuthType Basic
           AuthBasicProvider file
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
           Require valid-user
       </Location>
     </VirtualHost>
@@ -431,8 +478,6 @@ conf:
       query.timeout: 2m
       storage.tsdb.path: /var/lib/prometheus/data
       storage.tsdb.retention: 7d
-      storage.tsdb.min_block_duration: 2h
-      storage.tsdb.max_block_duration: 2h
       # NOTE(srwilkers): These settings default to false, but they are
       # exposed here to allow enabling if desired. Please note the security
       # impacts of enabling these flags. More information regarding the impacts
@@ -542,9 +587,11 @@ conf:
           # This job is not necessary and should be removed in Kubernetes 1.6 and
           # earlier versions, or it will cause the metrics to be scraped twice.
         - job_name: 'kubernetes-cadvisor'
+
           # Default to scraping over https. If required, just disable this or change to
           # `http`.
           scheme: https
+
           # This TLS & bearer token file config is used to connect to the actual scrape
           # endpoints for cluster components. This is separate to discovery auth
           # configuration because discovery & scraping are two separate concerns in
@@ -554,9 +601,10 @@ conf:
           tls_config:
             ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
           bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
           kubernetes_sd_configs:
           - role: node
-          scrape_interval: 45s
+
           relabel_configs:
           - action: labelmap
             regex: __meta_kubernetes_node_label_(.+)
@@ -567,23 +615,171 @@ conf:
             regex: (.+)
             target_label: __metrics_path__
             replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
-          - source_labels:
-              - __meta_kubernetes_node_name
-            action: replace
-            target_label: kubernetes_io_hostname
           metric_relabel_configs:
-          - action: replace
-            source_labels:
-              - id
-            regex: '^/machine\.slice/machine-rkt\\x2d([^\\]+)\\.+/([^/]+)\.service$'
-            target_label: rkt_container_name
-            replacement: '${2}-${1}'
-          - action: replace
-            source_labels:
-              - id
-            regex: '^/system\.slice/(.+)\.service$'
-            target_label: systemd_service_name
-            replacement: '${1}'
+          - source_labels:
+              - __name__
+            regex: 'container_network_tcp_usage_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_tasks_state'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_udp_usage_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_failures_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_cpu_load_average_10s'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_cpu_system_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_cpu_user_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_inodes_free'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_inodes_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_io_current'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_io_time_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_io_time_weighted_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_read_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_reads_merged_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_reads_merged_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_reads_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_sector_reads_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_sector_writes_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_write_seconds_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_writes_bytes_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_writes_merged_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_fs_writes_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_last_seen'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_cache'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_failcnt'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_max_usage_bytes'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_rss'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_swap'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_memory_usage_bytes'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_receive_errors_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_receive_packets_dropped_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_receive_packets_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_transmit_errors_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_transmit_packets_dropped_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_network_transmit_packets_total'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_spec_cpu_period'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_spec_cpu_shares'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_spec_memory_limit_bytes'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_spec_memory_reservation_limit_bytes'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_spec_memory_swap_limit_bytes'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'container_start_time_seconds'
+            action: drop
           # Scrape config for API servers.
           #
           # Kubernetes exposes API servers as endpoints to the default/kubernetes
@@ -624,6 +820,35 @@ conf:
               - __meta_kubernetes_endpoint_port_name
             action: keep
             regex: default;kubernetes;https
+          metric_relabel_configs:
+          - source_labels:
+              - __name__
+            regex: 'apiserver_admission_controller_admission_latencies_seconds_bucket'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'rest_client_request_latency_seconds_bucket'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'apiserver_response_sizes_bucket'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'apiserver_admission_step_admission_latencies_seconds_bucket'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'apiserver_admission_controller_admission_latencies_seconds_count'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'apiserver_admission_controller_admission_latencies_seconds_sum'
+            action: drop
+          - source_labels:
+              - __name__
+            regex: 'apiserver_request_latencies_summary'
+            action: drop
         # Scrape config for service endpoints.
         #
         # The relabeling allows the actual service scrape endpoint to be configured
@@ -691,7 +916,7 @@ conf:
           - source_labels:
               - __meta_kubernetes_service_name
             action: drop
-            regex: '(openstack-metrics|prom-metrics)'
+            regex: '(openstack-metrics|prom-metrics|ceph-mgr)'
           - source_labels:
               - __meta_kubernetes_service_annotation_prometheus_io_scrape
             action: keep
@@ -793,6 +1018,43 @@ conf:
             replacement: ${1}
           - target_label: endpoint
             replacement: "calico-etcd"
+        - job_name: ceph-mgr
+          kubernetes_sd_configs:
+          - role: service
+          scrape_interval: 20s
+          relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - action: keep
+            source_labels:
+              - __meta_kubernetes_service_name
+            regex: "ceph-mgr"
+          - source_labels:
+              - __meta_kubernetes_service_port_name
+            action: drop
+            regex: 'ceph-mgr'
+          - action: keep
+            source_labels:
+              - __meta_kubernetes_namespace
+            regex: ceph
+            target_label: namespace
+          - source_labels:
+              - __meta_kubernetes_pod_name
+            target_label: pod
+          - source_labels:
+              - __meta_kubernetes_service_name
+            target_label: service
+          - source_labels:
+              - __meta_kubernetes_service_name
+            target_label: job
+            replacement: ${1}
+          - source_labels:
+              - __meta_kubernetes_service_label
+            target_label: job
+            regex: ceph-mgr
+            replacement: ${1}
+          - target_label: endpoint
+            replacement: "ceph-mgr"
       alerting:
         alertmanagers:
         - kubernetes_sd_configs:
@@ -837,7 +1099,7 @@ conf:
             labels:
               severity: warning
             annotations:
-              description: Reloading Alertmanager's configuration has failed for {{ $labels.namespace }}/{{ $labels.pod}}.
+              description: Reloading Alertmanager's configuration has failed for {{ $labels.namespace }}/{{ $labels.pod }}.
               summary: Alertmanager configuration reload has failed
       etcd3:
         groups:
@@ -983,32 +1245,48 @@ conf:
         - name: kubelet.rules
           rules:
           - alert: K8SNodeNotReady
-            expr: kube_node_status_ready{condition="true"} == 0
-            for: 1h
+            expr: kube_node_status_condition{condition="Ready", status="unknown"} == 1 or kube_node_status_condition{condition="Ready", status="false"} == 1
+            for: 1m
             labels:
-              severity: warning
+              severity: critical
             annotations:
-              description: The Kubelet on {{ $labels.node }} has not checked in with the API, or has set itself to NotReady, for more than an hour
-              summary: Node status is NotReady
+              description: The Kubelet on {{ $labels.node }} has not checked in with the API, or has set itself to NotReady, for more than a minute
+              summary: '{{ $labels.node }} Node status is NotReady and {{ $labels.status }}'
           - alert: K8SManyNodesNotReady
-            expr: count(kube_node_status_ready{condition="true"} == 0) > 1 and (count(kube_node_status_ready{condition="true"} == 0) / count(kube_node_status_ready{condition="true"})) > 0.2
+            expr: count(kube_node_status_condition{condition="Ready", status="unknown"} == 1) > 1 and (count(kube_node_status_condition{condition="Ready", status="unknown"} == 1) / count(kube_node_status_condition{condition="Ready", status="unknown"})) > 0.2
             for: 1m
             labels:
               severity: critical
             annotations:
               description: '{{ $value }} Kubernetes nodes (more than 10% are in the NotReady state).'
               summary: Many Kubernetes nodes are Not Ready
+          - alert: K8SManyNodesNotReady
+            expr: count(kube_node_status_condition{condition="Ready", status="false"} == 1) > 1 and (count(kube_node_status_condition{condition="Ready", status="false"} == 1) / count(kube_node_status_condition{condition="Ready", status="false"})) > 0.2
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              description: '{{ $value }} Kubernetes nodes (more than 10% are in the NotReady state).'
+              summary: Many Kubernetes nodes are Not Ready
+          - alert: K8SNodesNotReady
+            expr: count(kube_node_status_condition{condition="Ready", status="false"} == 1) > 0 or count(kube_node_status_condition{condition="Ready", status="unknown"} == 1) > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              description: '{{ $value }} nodes are notReady state.'
+              summary: One or more Kubernetes nodes are Not Ready
           - alert: K8SKubeletDown
             expr: count(up{job="kubelet"} == 0) / count(up{job="kubelet"}) > 0.03
-            for: 1h
+            for: 1m
             labels:
-              severity: warning
+              severity: critical
             annotations:
               description: Prometheus failed to scrape {{ $value }}% of kubelets.
               summary: Many Kubelets cannot be scraped
           - alert: K8SKubeletDown
             expr: absent(up{job="kubelet"} == 1) or count(up{job="kubelet"} == 0) / count(up{job="kubelet"}) > 0.1
-            for: 1h
+            for: 1m
             labels:
               severity: critical
             annotations:
@@ -1025,82 +1303,6 @@ conf:
         groups:
         - name: kubernetes.rules
           rules:
-          - record: cluster_namespace_controller_pod_container:spec_memory_limit_bytes
-            expr: sum(label_replace(container_spec_memory_limit_bytes{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:spec_cpu_shares
-            expr: sum(label_replace(container_spec_cpu_shares{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:cpu_usage:rate
-            expr: sum(label_replace(irate(container_cpu_usage_seconds_total{container_name!=""}[5m]), "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:memory_usage:bytes
-            expr: sum(label_replace(container_memory_usage_bytes{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:memory_working_set:bytes
-            expr: sum(label_replace(container_memory_working_set_bytes{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:memory_rss:bytes
-            expr: sum(label_replace(container_memory_rss{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:memory_cache:bytes
-            expr: sum(label_replace(container_memory_cache{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:disk_usage:bytes
-            expr: sum(label_replace(container_disk_usage_bytes{container_name!=""}, "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name)
-          - record: cluster_namespace_controller_pod_container:memory_pagefaults:rate
-            expr: sum(label_replace(irate(container_memory_failures_total{container_name!=""}[5m]), "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name, scope, type)
-          - record: cluster_namespace_controller_pod_container:memory_oom:rate
-            expr: sum(label_replace(irate(container_memory_failcnt{container_name!=""}[5m]), "controller", "$1", "pod_name", "^(.*)-[a-z0-9]+")) BY (cluster, namespace, controller, pod_name, container_name, scope, type)
-          - record: cluster:memory_allocation:percent
-            expr: 100 * sum(container_spec_memory_limit_bytes{pod_name!=""}) BY (cluster) / sum(machine_memory_bytes) BY (cluster)
-          - record: cluster:memory_used:percent
-            expr: 100 * sum(container_memory_usage_bytes{pod_name!=""}) BY (cluster) / sum(machine_memory_bytes) BY (cluster)
-          - record: cluster:cpu_allocation:percent
-            expr: 100 * sum(container_spec_cpu_shares{pod_name!=""}) BY (cluster) / sum(container_spec_cpu_shares{id="/"} * ON(cluster, instance) machine_cpu_cores) BY (cluster)
-          - record: cluster:node_cpu_use:percent
-            expr: 100 * sum(rate(node_cpu{mode!="idle"}[5m])) BY (cluster) / sum(machine_cpu_cores) BY (cluster)
-          - record: cluster_resource_verb:apiserver_latency:quantile_seconds
-            expr: histogram_quantile(0.99, sum(apiserver_request_latencies_bucket) BY (le, cluster, job, resource, verb)) / 1e+06
-            labels:
-              quantile: "0.99"
-          - record: cluster_resource_verb:apiserver_latency:quantile_seconds
-            expr: histogram_quantile(0.9, sum(apiserver_request_latencies_bucket) BY (le, cluster, job, resource, verb)) / 1e+06
-            labels:
-              quantile: "0.9"
-          - record: cluster_resource_verb:apiserver_latency:quantile_seconds
-            expr: histogram_quantile(0.5, sum(apiserver_request_latencies_bucket) BY (le, cluster, job, resource, verb)) / 1e+06
-            labels:
-              quantile: "0.5"
-          - record: cluster:scheduler_e2e_scheduling_latency:quantile_seconds
-            expr: histogram_quantile(0.99, sum(scheduler_e2e_scheduling_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.99"
-          - record: cluster:scheduler_e2e_scheduling_latency:quantile_seconds
-            expr: histogram_quantile(0.9, sum(scheduler_e2e_scheduling_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.9"
-          - record: cluster:scheduler_e2e_scheduling_latency:quantile_seconds
-            expr: histogram_quantile(0.5, sum(scheduler_e2e_scheduling_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.5"
-          - record: cluster:scheduler_scheduling_algorithm_latency:quantile_seconds
-            expr: histogram_quantile(0.99, sum(scheduler_scheduling_algorithm_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.99"
-          - record: cluster:scheduler_scheduling_algorithm_latency:quantile_seconds
-            expr: histogram_quantile(0.9, sum(scheduler_scheduling_algorithm_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.9"
-          - record: cluster:scheduler_scheduling_algorithm_latency:quantile_seconds
-            expr: histogram_quantile(0.5, sum(scheduler_scheduling_algorithm_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.5"
-          - record: cluster:scheduler_binding_latency:quantile_seconds
-            expr: histogram_quantile(0.99, sum(scheduler_binding_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.99"
-          - record: cluster:scheduler_binding_latency:quantile_seconds
-            expr: histogram_quantile(0.9, sum(scheduler_binding_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.9"
-          - record: cluster:scheduler_binding_latency:quantile_seconds
-            expr: histogram_quantile(0.5, sum(scheduler_binding_latency_microseconds_bucket) BY (le, cluster)) / 1e+06
-            labels:
-              quantile: "0.5"
           - alert: kube_statefulset_replicas_unavailable
             expr: kube_statefulset_status_replicas < kube_statefulset_replicas
             for: 5m
@@ -1109,7 +1311,7 @@ conf:
             annotations:
               description: 'statefulset {{$labels.statefulset}} has {{$value}} replicas, which is less than desired'
               summary: '{{$labels.statefulset}}: has inssuficient replicas.'
-          - alert: kube_daemonsets_misscheduled
+          - alert: daemonsets_misscheduled
             expr: kube_daemonset_status_number_misscheduled > 0
             for: 10m
             labels:
@@ -1117,7 +1319,7 @@ conf:
             annotations:
               description: 'Daemonset {{$labels.daemonset}} is running where it is not supposed to run'
               summary: 'Daemonsets not scheduled correctly'
-          - alert: kube_daemonsets_not_scheduled
+          - alert: daemonsets_not_scheduled
             expr: kube_daemonset_status_desired_number_scheduled - kube_daemonset_status_current_number_scheduled > 0
             for: 10m
             labels:
@@ -1125,7 +1327,15 @@ conf:
             annotations:
               description: '{{ $value }} of Daemonset {{$labels.daemonset}} scheduled which is less than desired number'
               summary: 'Less than desired number of daemonsets scheduled'
-          - alert: kube_deployment_replicas_unavailable
+          - alert: daemonset_pods_unavailable
+            expr: kube_daemonset_status_number_unavailable > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: 'Daemonset {{$labels.daemonset}} currently has pods unavailable'
+              summary: 'Daemonset pods unavailable, due to one of many reasons'
+          - alert: deployment_replicas_unavailable
             expr: kube_deployment_status_replicas_unavailable > 0
             for: 10m
             labels:
@@ -1133,7 +1343,7 @@ conf:
             annotations:
               description: 'deployment {{$labels.deployment}} has {{$value}} replicas unavailable'
               summary: '{{$labels.deployment}}: has inssuficient replicas.'
-          - alert: kube_rollingupdate_deployment_replica_less_than_spec_max_unavailable
+          - alert: rollingupdate_deployment_replica_less_than_spec_max_unavailable
             expr: kube_deployment_status_replicas_available - kube_deployment_spec_strategy_rollingupdate_max_unavailable < 0
             for: 10m
             labels:
@@ -1141,7 +1351,7 @@ conf:
             annotations:
               description: 'deployment {{$labels.deployment}} has {{$value}} replicas available which is less than specified as max unavailable during a rolling update'
               summary: '{{$labels.deployment}}: has inssuficient replicas during a rolling update.'
-          - alert: kube_job_status_failed
+          - alert: job_status_failed
             expr: kube_job_status_failed > 0
             for: 10m
             labels:
@@ -1149,7 +1359,7 @@ conf:
             annotations:
               description: 'Job {{$labels.exported_job}} is in failed status'
               summary: '{{$labels.exported_job}} has failed status'
-          - alert: kube_pod_status_pending
+          - alert: pod_status_pending
             expr: kube_pod_status_phase{phase="Pending"} == 1
             for: 10m
             labels:
@@ -1157,7 +1367,7 @@ conf:
             annotations:
               description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has been in pending status for more than 10 minutes'
               summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in pending status'
-          - alert: kube_pod_error_image_pull
+          - alert: pod_error_image_pull
             expr: kube_pod_container_status_waiting_reason {reason="ErrImagePull"} == 1
             for: 10m
             labels:
@@ -1165,15 +1375,31 @@ conf:
             annotations:
               description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has an Image pull error for more than 10 minutes'
               summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in error status'
-          - alert: kube_pod_status_error_image_pull
-            expr: kube_pod_container_status_waiting_reason {reason="ErrImagePull"} == 1
+          - alert: pod_status_error_image_pull_backoff
+            expr: kube_pod_container_status_waiting_reason {reason="ImagePullBackOff"} == 1
             for: 10m
             labels:
               severity: page
             annotations:
-              description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has an Image pull error for more than 10 minutes'
+              description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has an ImagePullBackOff error for more than 10 minutes'
               summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in error status'
-          - alert: kube_replicaset_missing_replicas
+          - alert: pod_error_crash_loop_back_off
+            expr: kube_pod_container_status_waiting_reason {reason="CrashLoopBackOff"} == 1
+            for: 10m
+            labels:
+              severity: page
+            annotations:
+              description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has an CrashLoopBackOff  error for more than 10 minutes'
+              summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in error status'
+          - alert: pod_error_config_error
+            expr: kube_pod_container_status_waiting_reason {reason="CreateContainerConfigError"} == 1
+            for: 10m
+            labels:
+              severity: page
+            annotations:
+              description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has a CreateContainerConfigError error for more than 10 minutes'
+              summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in error status'
+          - alert: replicaset_missing_replicas
             expr:  kube_replicaset_spec_replicas -  kube_replicaset_status_ready_replicas > 0
             for: 10m
             labels:
@@ -1181,7 +1407,7 @@ conf:
             annotations:
               description: 'Replicaset {{$labels.replicaset}} is missing desired number of replicas for more than 10 minutes'
               summary: 'Replicaset {{$labels.replicaset}} is missing replicas'
-          - alert: kube_pod_container_terminated
+          - alert: pod_container_terminated
             expr: kube_pod_container_status_terminated_reason{reason=~"OOMKilled|Error|ContainerCannotRun"} > 0
             for: 10m
             labels:
@@ -1190,7 +1416,7 @@ conf:
               description: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} has a container terminated for more than 10 minutes'
               summary: 'Pod {{$labels.pod}} in namespace {{$labels.namespace}} in error status'
           - alert: volume_claim_capacity_high_utilization
-            expr: (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes) > 0.80
+            expr: (kubelet_volume_stats_capacity_bytes / kubelet_volume_stats_used_bytes) < 1.25
             for: 5m
             labels:
               severity: page
@@ -1202,7 +1428,7 @@ conf:
         - name: basic_linux.rules
           rules:
           - alert: node_filesystem_full_80percent
-            expr: sort(node_filesystem_free{device!="ramfs"} < node_filesystem_size{device!="ramfs"}
+            expr: sort(node_filesystem_free{fstype =~ "xfs|ext[34]"} < node_filesystem_size{fstype =~ "xfs|ext[34]"}
               * 0.2) / 1024 ^ 3
             for: 5m
             labels:
@@ -1212,7 +1438,7 @@ conf:
                 got less than 10% space left on its filesystem.'
               summary: '{{$labels.alias}}: Filesystem is running out of space soon.'
           - alert: node_filesystem_full_in_4h
-            expr: predict_linear(node_filesystem_free{device!="ramfs"}[1h], 4 * 3600) <= 0
+            expr: predict_linear(node_filesystem_free{fstype =~ "xfs|ext[34]"}[1h], 4 * 3600) <= 0
             for: 5m
             labels:
               severity: page
@@ -1411,7 +1637,7 @@ conf:
               description: '{{$labels.alias}} has time difference of more than 2 seconds compared to NTP server: {{ $value }}'
               summary: '{{$labels.alias}}: time is skewed by : {{$value}} seconds'
           - alert: node_disk_read_latency
-            expr: (rate(node_disk_read_time_ms[5m]) / rate(node_disk_reads_completed[5m])) > 10
+            expr: (rate(node_disk_read_time_ms[5m]) / rate(node_disk_reads_completed[5m])) > 40
             for: 5m
             labels:
               severity: page
@@ -1419,7 +1645,7 @@ conf:
               description: '{{$labels.device}} has a high read latency of {{ $value }}'
               summary: 'High read latency observed for device {{ $labels.device }}'
           - alert: node_disk_write_latency
-            expr: (rate(node_disk_write_time_ms[5m]) / rate(node_disk_writes_completed[5m])) > 10
+            expr: (rate(node_disk_write_time_ms[5m]) / rate(node_disk_writes_completed[5m])) > 40
             for: 5m
             labels:
               severity: page
@@ -1431,7 +1657,7 @@ conf:
         - name: openstack.rules
           rules:
           - alert: os_glance_api_availability
-            expr:  check_glance_api != 1
+            expr:  openstack_check_glance_api != 1
             for: 5m
             labels:
               severity: page
@@ -1439,7 +1665,7 @@ conf:
               description: 'Glance API is not available at {{$labels.url}} for more than 5 minutes'
               summary: 'Glance API is not available at {{$labels.url}}'
           - alert: os_nova_api_availability
-            expr:  check_nova_api != 1
+            expr:  openstack_check_nova_api != 1
             for: 5m
             labels:
               severity: page
@@ -1447,7 +1673,7 @@ conf:
               description: 'Nova API is not available at {{$labels.url}} for more than 5 minutes'
               summary: 'Nova API is not available at {{$labels.url}}'
           - alert: os_keystone_api_availability
-            expr:  check_keystone_api != 1
+            expr:  openstack_check_keystone_api != 1
             for: 5m
             labels:
               severity: page
@@ -1455,23 +1681,79 @@ conf:
               description: 'Keystone API is not available at {{$labels.url}} for more than 5 minutes'
               summary: 'Keystone API is not available at {{$labels.url}}'
           - alert: os_neutron_api_availability
-            expr:  check_neutron_api != 1
+            expr:  openstack_check_neutron_api != 1
             for: 5m
             labels:
               severity: page
             annotations:
               description: 'Neutron API is not available at {{$labels.url}} for more than 5 minutes'
               summary: 'Neutron API is not available at {{$labels.url}}'
+          - alert: os_neutron_metadata_agent_availability
+            expr:  openstack_services_neutron_metadata_agent_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'One or more neutron metadata_agents are not available for more than 5 minutes'
+              summary: 'One or more neutron metadata_agents are not available'
+          - alert: os_neutron_openvswitch_agent_availability
+            expr:  openstack_services_neutron_openvswitch_agent_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'One or more neutron openvswitch agents are not available for more than 5 minutes'
+              summary: 'One or more neutron openvswitch agents are not available'
+          - alert: os_neutron_dhcp_agent_availability
+            expr:  openstack_services_neutron_dhcp_agent_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'One or more neutron dhcp agents are not available for more than 5 minutes'
+              summary: 'One or more neutron dhcp agents are not available'
+          - alert: os_neutron_l3_agent_availability
+            expr:  openstack_services_neutron_l3_agent_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'One or more neutron L3 agents are not available for more than 5 minutes'
+              summary: 'One or more neutron L3 agents are not available'
           - alert: os_swift_api_availability
-            expr:  check_swift_api != 1
+            expr:  openstack_check_swift_api != 1
             for: 5m
             labels:
               severity: page
             annotations:
               description: 'Swift API is not available at {{$labels.url}} for more than 5 minutes'
               summary: 'Swift API is not available at {{$labels.url}}'
+          - alert: os_cinder_api_availability
+            expr:  openstack_check_cinder_api != 1
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Cinder API is not available at {{$labels.url}} for more than 5 minutes'
+              summary: 'Cinder API is not available at {{$labels.url}}'
+          - alert: os_cinder_scheduler_availability
+            expr:  openstack_services_cinder_cinder_scheduler != 1
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Cinder scheduler is not available for more than 5 minutes'
+              summary: 'Cinder scheduler is not available'
+          - alert: os_heat_api_availability
+            expr:  openstack_check_heat_api != 1
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Heat API is not available at {{$labels.url}} for more than 5 minutes'
+              summary: 'Heat API is not available at {{$labels.url}}'
           - alert: os_nova_compute_disabled
-            expr:  services_nova_compute_disabled_total > 0
+            expr:  openstack_services_nova_compute_disabled_total > 0
             for: 5m
             labels:
               severity: page
@@ -1479,7 +1761,7 @@ conf:
               description: 'nova-compute is disabled on certain hosts for more than 5 minutes'
               summary: 'Openstack compute service nova-compute is disabled on some hosts'
           - alert: os_nova_conductor_disabled
-            expr:  services_nova_conductor_disabled_total > 0
+            expr:  openstack_services_nova_conductor_disabled_total > 0
             for: 5m
             labels:
               severity: page
@@ -1487,7 +1769,7 @@ conf:
               description: 'nova-conductor is disabled on certain hosts for more than 5 minutes'
               summary: 'Openstack compute service nova-conductor is disabled on some hosts'
           - alert: os_nova_consoleauth_disabled
-            expr:  services_nova_consoleauth_disabled_total > 0
+            expr:  openstack_services_nova_consoleauth_disabled_total > 0
             for: 5m
             labels:
               severity: page
@@ -1495,19 +1777,83 @@ conf:
               description: 'nova-consoleauth is disabled on certain hosts for more than 5 minutes'
               summary: 'Openstack compute service nova-consoleauth is disabled on some hosts'
           - alert: os_nova_scheduler_disabled
-            expr:  services_nova_scheduler_disabled_total > 0
+            expr:  openstack_services_nova_scheduler_disabled_total > 0
             for: 5m
             labels:
               severity: page
             annotations:
               description: 'nova-scheduler is disabled on certain hosts for more than 5 minutes'
               summary: 'Openstack compute service nova-scheduler is disabled on some hosts'
+          - alert: os_nova_compute_down
+            expr:  openstack_services_nova_compute_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'nova-compute is down on certain hosts for more than 5 minutes'
+              summary: 'Openstack compute service nova-compute is down on some hosts'
+          - alert: os_nova_conductor_down
+            expr:  openstack_services_nova_conductor_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'nova-conductor is down on certain hosts for more than 5 minutes'
+              summary: 'Openstack compute service nova-conductor is down on some hosts'
+          - alert: os_nova_consoleauth_down
+            expr:  openstack_services_nova_consoleauth_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'nova-consoleauth is down on certain hosts for more than 5 minutes'
+              summary: 'Openstack compute service nova-consoleauth is down on some hosts'
+          - alert: os_nova_scheduler_down
+            expr:  openstack_services_nova_scheduler_down_total > 0
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'nova-scheduler is down on certain hosts for more than 5 minutes'
+              summary: 'Openstack compute service nova-scheduler is down on some hosts'
+          - alert: os_vm_vcpu_usage_high
+            expr: openstack_total_used_vcpus * 100/(openstack_total_used_vcpus + openstack_total_free_vcpus) > 80
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Openstack VM vcpu usage is hight at {{$value}} percent'
+              summary: 'Openstack VM vcpu usage is high'
+          - alert: os_vm_ram_usage_high
+            expr: openstack_total_used_ram_MB * 100/(openstack_total_used_ram_MB + openstack_total_free_ram_MB) > 80
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Openstack VM RAM usage is hight at {{$value}} percent'
+              summary: 'Openstack VM RAM usage is high'
+          - alert: os_vm_disk_usage_high
+            expr: openstack_total_used_disk_GB * 100/ ( openstack_total_used_disk_GB + openstack_total_free_disk_GB ) > 80
+            for: 5m
+            labels:
+              severity: page
+            annotations:
+              description: 'Openstack VM Disk usage is hight at {{$value}} percent'
+              summary: 'Openstack VM Disk usage is high'
       ceph:
         groups:
         - name: ceph.rules
           rules:
-          - alert: ceph_monitor_quorum_low
-            expr:  ceph_monitor_quorum_count < 3
+          - alert: no_active_ceph_mgr
+            expr: count(up{job="ceph-mgr"} == 1) == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              description: 'no ceph active mgr is present or all ceph mgr are down'
+              summary: 'no ceph active mgt is present'
+          - alert: ceph_mon_quorum_low
+            expr:  ceph_mon_quorum_count < 3
             for: 5m
             labels:
               severity: page
@@ -1515,7 +1861,7 @@ conf:
               description: 'ceph monitor quorum has been less than 3 for more than 5 minutes'
               summary: 'ceph high availability is at risk'
           - alert: ceph_cluster_usage_high
-            expr:  100* ceph_cluster_used_bytes/ceph_cluster_capacity_bytes > 80
+            expr: 100* ceph_cluster_total_used_bytes/ceph_cluster_total_bytes > 80
             for: 5m
             labels:
               severity: page
@@ -1523,29 +1869,37 @@ conf:
               description: 'ceph cluster capacity usage more than 80 percent'
               summary: 'ceph cluster usage is more than 80 percent'
           - alert: ceph_placement_group_degrade_pct_high
-            expr:  100*ceph_degraded_pgs/ceph_total_pgs > 80
+            expr: 100 * sum(ceph_pg_degraded)/sum(ceph_osd_numpg) > 80
             for: 5m
             labels:
-              severity: page
+              severity: critical
             annotations:
               description: 'ceph placement group degradation is more than 80 percent'
               summary: 'ceph placement groups degraded'
           - alert: ceph_osd_down_pct_high
-            expr:  100* ceph_osds_down/(ceph_osds_down+ceph_osds_up) > 80
+            expr:  100 * count(ceph_osd_up==0)/count(ceph_osd_metadata) > 80
             for: 5m
             labels:
-              severity: page
+              severity: critical
             annotations:
               description: 'ceph OSDs down percent is more than 80 percent'
               summary: 'ceph OSDs down percent is high'
-          - alert: ceph_monitor_clock_skew_high
-            expr:  ceph_monitor_clock_skew_seconds > 2
+          - alert: ceph_osd_down
+            expr: ceph_osd_up == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              description: 'ceph OSD {{ $ceph_daemon }} is down in instance {{ $instance }}'
+              summary: 'ceph OSD {{ $ceph_daemon }} is down in instance {{ $instance }}'
+          - alert: ceph_osd_out
+            expr: ceph_osd_in == 0
             for: 5m
             labels:
               severity: page
             annotations:
-              description: 'ceph monitors clock skew on {{$labels.instance}} is more than 2 seconds'
-              summary: 'ceph monitor clock skew high'
+              description: 'ceph OSD {{ $ceph_daemon }} is out in instance {{ $instance }}'
+              summary: 'ceph OSD {{ $ceph_daemon }} is out in instance {{ $instance }}'
       fluentd:
         groups:
         - name: fluentd.rules
@@ -1727,12 +2081,12 @@ conf:
               description: 'Elasticsearch cluster health status call timedout {{ $value }} times.'
               summary: 'Elasticsearch cluster health status calls are timing out.'
           - alert: es_cluster_health_status_alert
-            expr: elasticsearch_cluster_health_status > 0
+            expr: (sum(elasticsearch_cluster_health_status{color="green"})*2)+sum(elasticsearch_cluster_health_status{color="yellow"}) < 2
             for: 10m
             labels:
               severity: warning
             annotations:
-              description: 'Elasticsearch cluster health status is not green. One or more shards or replicas are unallocated.'
+              description: 'Elasticsearch cluster health status is {{ $value }}, not 2 (green). One or more shards or replicas are unallocated.'
               summary: 'Elasticsearch cluster health status is not green.'
           - alert: es_cluster_health_too_few_nodes_running
             expr: elasticsearch_cluster_health_number_of_nodes < 3
@@ -1742,6 +2096,14 @@ conf:
             annotations:
               description: 'There are only {{$value}} < 3 ElasticSearch nodes running'
               summary: 'ElasticSearch running on less than 3 nodes'
+          - alert: es_cluster_health_too_few_data_nodes_running
+            expr: elasticsearch_cluster_health_number_of_data_nodes < 3
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: 'There are only {{$value}} < 3 ElasticSearch data nodes running'
+              summary: 'ElasticSearch running on less than 3 data nodes'
           - alert: es_cluster_health_too_few_data_nodes_running
             expr: elasticsearch_cluster_health_number_of_data_nodes < 3
             for: 10m
@@ -1786,3 +2148,107 @@ conf:
             annotations:
               description: 'The mysql innodb replication has fallen behind and is not recovering'
               summary: 'MySQL innodb replication is lagging'
+      postgresql:
+        groups:
+        - name: postgresql.rules
+          rules:
+          - alert: pg_replication_fallen_behind
+            expr: (pg_replication_lag > 120) and ON(instance) (pg_replication_is_replica ==  1)
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              description: Replication lag on server {{$labels.instance}} is currently {{$value | humanizeDuration }}
+              title: Postgres Replication lag is over 2 minutes
+          - alert: pg_connections_too_high
+            expr: sum(pg_stat_activity_count) BY (environment, fqdn) > ON(fqdn) pg_settings_max_connections * 0.95
+            for: 5m
+            labels:
+              severity: warn
+              channel: database
+            annotations:
+              title: Postgresql has {{$value}} connections on {{$labels.fqdn}} which is close to the maximum
+          - alert: pg_deadlocks_detected
+            expr: sum by(datname) (rate(pg_stat_database_deadlocks[1m])) > 0
+            for: 5m
+            labels:
+              severity: warn
+            annotations:
+              description: postgresql at {{$labels.instance}} is showing {{$value}} rate of deadlocks for database {{$labels.datname}}
+              title: Postgres server is experiencing deadlocks
+      prometheus_exporters:
+        groups:
+        - name: prometheus_exporters.rules
+          rules:
+          - alert: prom_exporter_ceph_unavailable
+            expr: absent(ceph_health_status)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: Ceph exporter is not collecting metrics or is not available for past 10 minutes
+              title: Ceph exporter is not collecting metrics or is not available
+          - alert: prom_exporter_openstack_unavailable
+            expr: absent(openstack_exporter_cache_refresh_duration_seconds)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: Openstack exporter is not collecting metrics or is not available for past 10 minutes
+              title: Openstack exporter is not collecting metrics or is not available
+          - alert: prom_exporter_mariadb_unavailable
+            expr: absent(mysql_up)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: MariaDB exporter is not collecting metrics or is not available for past 10 minutes
+              title: MariaDB exporter is not collecting metrics or is not available
+          - alert: prom_exporter_kube_state_metrics_unavailable
+            expr: absent(kube_node_info)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: kube-state-metrics exporter is not collecting metrics or is not available for past 10 minutes
+              title: kube-state-metrics exporter is not collecting metrics or is not available
+          - alert: prom_exporter_postgresql_unavailable
+            expr: absent(pg_static)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: postgresql exporter is not collecting metrics or is not available for past 10 minutes
+              title: postgresql exporter is not collecting metrics or is not available
+          - alert: prom_exporter_node_unavailable
+            expr: absent(node_uname_info)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: node exporter is not collecting metrics or is not available for past 10 minutes
+              title: node exporter is not collecting metrics or is not available
+          - alert: prom_exporter_calico_unavailable
+            expr: absent(felix_host)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: Calico exporter is not collecting metrics or is not available for past 10 minutes
+              title: Calico exporter is not collecting metrics or is not available
+          - alert: prom_exporter_elasticsearch_unavailable
+            expr: absent(elasticsearch_cluster_health_status)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: Elasticsearch exporter is not collecting metrics or is not available for past 10 minutes
+              title: Elasticsearch exporter is not collecting metrics or is not available
+          - alert: prom_exporter_fluentd_unavailable
+            expr: absent(fluentd_up)
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              description: Fluentd exporter is not collecting metrics or is not available for past 10 minutes
+              title: Fluentd exporter is not collecting metrics or is not available

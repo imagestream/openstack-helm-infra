@@ -24,6 +24,8 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: ldap
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "ldap" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -36,6 +38,10 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "ldap" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
@@ -56,12 +62,16 @@ spec:
           ports:
             - containerPort: {{ tuple "ldap" "internal" "ldap" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: ldap-data
               mountPath: /var/lib/ldap
             - name: ldap-config
               mountPath: /etc/ldap/slapd.d
-{{- if not .Values.storage.pvc.enabled }}
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
+{{- if not .Values.storage.pvc.enabled }}
         - name: ldap-data
           hostPath:
             path: {{ .Values.storage.host.data_path }}
@@ -70,21 +80,21 @@ spec:
             path: {{ .Values.storage.host.config_path }}
 {{- else }}
   volumeClaimTemplates:
-  - metadata:
-      name: ldap-data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      storageClassName: {{ .Values.storage.pvc.class_name }}
-      resources:
-        requests:
-          storage: {{ .Values.storage.pvc.size }}
-  - metadata:
-      name: ldap-config
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      storageClassName: {{ .Values.storage.pvc.class_name }}
-      resources:
-        requests:
-          storage: {{ .Values.storage.pvc.size }}
+    - metadata:
+        name: ldap-data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        storageClassName: {{ .Values.storage.pvc.class_name }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.pvc.size }}
+    - metadata:
+        name: ldap-config
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        storageClassName: {{ .Values.storage.pvc.class_name }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.pvc.size }}
 {{- end }}
 {{- end }}

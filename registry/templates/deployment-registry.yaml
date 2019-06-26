@@ -17,13 +17,15 @@ limitations under the License.
 {{- if .Values.manifests.deployment_registry }}
 {{- $envAll := . }}
 
-{{- $serviceAccountName := "docker-registry"}}
+{{- $serviceAccountName := "docker-registry" }}
 {{ tuple $envAll "registry" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: docker-registry
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "docker" "registry" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -37,9 +39,11 @@ spec:
       labels:
 {{ tuple $envAll "docker" "registry" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "registry" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "docker" "registry" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
@@ -51,23 +55,28 @@ spec:
         - name: registry
 {{ tuple $envAll "registry" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.registry | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "registry" "container" "registry" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           ports:
             - name: d-reg
               containerPort: {{ tuple "docker_registry" "internal" "registry" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           command:
             - /tmp/registry.sh
           volumeMounts:
-          - name: registry-bin
-            mountPath: /tmp/registry.sh
-            subPath: registry.sh
-            readOnly: true
-          - name: registry-etc
-            mountPath: /etc/docker/registry/config.yml
-            subPath: config.yml
-            readOnly: true
-          - name: docker-images
-            mountPath: {{ .Values.conf.registry.storage.filesystem.rootdirectory }}
+            - name: pod-tmp
+              mountPath: /tmp
+            - name: registry-bin
+              mountPath: /tmp/registry.sh
+              subPath: registry.sh
+              readOnly: true
+            - name: registry-etc
+              mountPath: /etc/docker/registry/config.yml
+              subPath: config.yml
+              readOnly: true
+            - name: docker-images
+              mountPath: {{ .Values.conf.registry.storage.filesystem.rootdirectory }}
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: registry-bin
           configMap:
             name: registry-bin

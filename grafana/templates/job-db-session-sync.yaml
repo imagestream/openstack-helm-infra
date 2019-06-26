@@ -24,12 +24,15 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: grafana-db-session-sync
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
   template:
     metadata:
       labels:
 {{ tuple $envAll "grafana" "db-session-sync" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
     spec:
+{{ dict "envAll" $envAll "application" "db_session_sync" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
       restartPolicy: OnFailure
       nodeSelector:
@@ -40,6 +43,7 @@ spec:
         - name: grafana-db-session-sync
 {{ tuple $envAll "grafana_db_session_sync" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.jobs.db_session_sync | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "db-session-sync" "container" "grafana_db_session_sync" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
             - name: DB_CONNECTION
               valueFrom:
@@ -49,11 +53,15 @@ spec:
           command:
             - /tmp/db-session-sync.py
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: grafana-bin
               mountPath: /tmp/db-session-sync.py
               subPath: db-session-sync.py
               readOnly: true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: grafana-bin
           configMap:
             name: grafana-bin

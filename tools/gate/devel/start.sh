@@ -54,18 +54,18 @@ function ansible_install {
       jq
   fi
 
-  sudo -H -E pip install --no-cache-dir --upgrade pip
-  sudo -H -E pip install --no-cache-dir --upgrade setuptools
+  sudo -H -E pip install --upgrade pip
+  sudo -H -E pip install --upgrade setuptools
   # NOTE(lamt) Preinstalling a capped version of cmd2 to address bug:
   # https://github.com/python-cmd2/cmd2/issues/421
-  sudo -H -E pip install --no-cache-dir --upgrade "cmd2<=0.8.7"
-  sudo -H -E pip install --no-cache-dir --upgrade pyopenssl
+  sudo -H -E pip install --upgrade "cmd2<=0.8.7"
+  sudo -H -E pip install --upgrade pyopenssl
   # NOTE(srwilkers): Pinning ansible to 2.5.5, as pip installs 2.6 by default.
   # 2.6 introduces a new command flag (init) for the docker_container module
   # that is incompatible with what we have currently. 2.5.5 ensures we match
   # what's deployed in the gates
-  sudo -H -E pip install --no-cache-dir --upgrade "ansible==2.5.5"
-  sudo -H -E pip install --no-cache-dir --upgrade \
+  sudo -H -E pip install --upgrade "ansible==2.5.5"
+  sudo -H -E pip install --upgrade \
     ara \
     yq
 }
@@ -75,13 +75,11 @@ if [ "x${DEPLOY}" == "xsetup-host" ]; then
   PLAYBOOKS="osh-infra-deploy-docker"
 elif [ "x${DEPLOY}" == "xk8s" ]; then
   PLAYBOOKS="osh-infra-build osh-infra-deploy-k8s"
-elif [ "x${DEPLOY}" == "xcharts" ]; then
-  PLAYBOOKS="osh-infra-deploy-charts"
 elif [ "x${DEPLOY}" == "xlogs" ]; then
   PLAYBOOKS="osh-infra-collect-logs"
 elif [ "x${DEPLOY}" == "xfull" ]; then
   ansible_install
-  PLAYBOOKS="osh-infra-deploy-docker osh-infra-build osh-infra-deploy-k8s osh-infra-deploy-charts osh-infra-collect-logs"
+  PLAYBOOKS="osh-infra-deploy-docker osh-infra-build osh-infra-deploy-k8s osh-infra-collect-logs"
 else
   echo "Unknown Deploy Option Selected"
   exit 1

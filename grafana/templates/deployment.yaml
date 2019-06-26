@@ -26,6 +26,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "grafana" "dashboard" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -39,10 +41,14 @@ spec:
       labels:
 {{ tuple $envAll "grafana" "dashboard" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "dashboard" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "grafana" "dashboard" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
       nodeSelector:
         {{ .Values.labels.grafana.node_selector_key }}: {{ .Values.labels.grafana.node_selector_value | quote }}
       initContainers:
@@ -51,6 +57,7 @@ spec:
         - name: grafana
 {{ tuple $envAll "grafana" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.grafana | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "dashboard" "container" "grafana" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/grafana.sh
             - start
@@ -77,6 +84,8 @@ spec:
             - name: PROMETHEUS_URL
               value: {{ tuple "monitoring" "internal" "api" $envAll | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" }}
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: pod-etc-grafana
               mountPath: /etc/grafana
             - name: pod-provisioning-grafana
@@ -106,6 +115,8 @@ spec:
             {{- end }}
 {{ if $mounts_grafana.volumeMounts }}{{ toYaml $mounts_grafana.volumeMounts | indent 12 }}{{ end }}
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: pod-etc-grafana
           emptyDir: {}
         - name: pod-provisioning-grafana
@@ -115,8 +126,8 @@ spec:
             name: grafana-bin
             defaultMode: 0555
         - name: grafana-etc
-          configMap:
-            name: grafana-etc
+          secret:
+            secretName: grafana-etc
             defaultMode: 0444
         - name: data
           emptyDir: {}

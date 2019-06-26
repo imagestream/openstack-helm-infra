@@ -20,6 +20,8 @@ limitations under the License.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
     k8s-app: kube-dns
 {{ tuple $envAll "kubernetes" "dns" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
@@ -40,6 +42,9 @@ spec:
       labels:
         k8s-app: kube-dns
 {{ tuple $envAll "kubernetes" "dns" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
       affinity:
         nodeAffinity:
@@ -100,6 +105,8 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - mountPath: /kube-dns-config
               name: kube-dns-config
         - name: dnsmasq
@@ -140,6 +147,8 @@ spec:
           terminationMessagePath: /dev/termination-log
           terminationMessagePolicy: File
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - mountPath: /etc/k8s/dns/dnsmasq-nanny
               name: kube-dns-config
         - name: sidecar
@@ -182,9 +191,11 @@ spec:
       - effect: NoSchedule
         key: node-role.kubernetes.io/master
       volumes:
-      - configMap:
-          defaultMode: 420
-          name: kube-dns
-          optional: true
-        name: kube-dns-config
+        - name: pod-tmp
+          emptyDir: {}
+        - configMap:
+            defaultMode: 420
+            name: kube-dns
+            optional: true
+          name: kube-dns-config
 {{- end }}

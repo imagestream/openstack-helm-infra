@@ -25,6 +25,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prometheus-openstack-exporter
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "prometheus-openstack-exporter" "exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -37,8 +39,14 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "prometheus-openstack-exporter" "exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ dict "envAll" $envAll "podName" "prometheus-openstack-exporter" "containerNames" (list "openstack-metrics-exporter") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
     spec:
+{{ dict "envAll" $envAll "application" "exporter" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "prometheus-openstack-exporter" "exporter" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
       nodeSelector:
         {{ .Values.labels.openstack_exporter.node_selector_key }}: {{ .Values.labels.openstack_exporter.node_selector_value | quote }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.prometheus_openstack_exporter.timeout | default "30" }}
@@ -48,6 +56,7 @@ spec:
         - name: openstack-metrics-exporter
 {{ tuple $envAll "prometheus_openstack_exporter" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.prometheus_openstack_exporter | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "exporter" "container" "openstack_metrics_exporter" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/prometheus-openstack-exporter.sh
             - start
@@ -74,11 +83,15 @@ spec:
 {{- include "helm-toolkit.snippets.keystone_openrc_env_vars" $env | indent 12 }}
 {{- end }}
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: prometheus-openstack-exporter-bin
               mountPath: /tmp/prometheus-openstack-exporter.sh
               subPath: prometheus-openstack-exporter.sh
               readOnly: true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: prometheus-openstack-exporter-bin
           configMap:
             name: prometheus-openstack-exporter-bin

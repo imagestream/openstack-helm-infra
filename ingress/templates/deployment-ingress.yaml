@@ -155,6 +155,8 @@ kind: DaemonSet
 {{- end }}
 metadata:
   name: ingress
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "ingress" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
     app: ingress-api
@@ -172,7 +174,13 @@ spec:
       labels:
 {{ tuple $envAll "ingress" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
         app: ingress-api
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-conf.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "server" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      shareProcessNamespace: true
       serviceAccountName: {{ $serviceAccountName }}
 {{- if eq .Values.deployment.type "Deployment" }}
       affinity:
@@ -189,16 +197,14 @@ spec:
 {{ tuple $envAll "ingress" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
 {{- if and .Values.network.host_namespace .Values.network.vip.manage }}
         - name: ingress-vip-kernel-modules
-{{ tuple $envAll "ingress" | include "helm-toolkit.snippets.image" | indent 10 }}
-          securityContext:
-            capabilities:
-              add:
-                - SYS_MODULE
-            runAsUser: 0
+{{ tuple $envAll "ingress_module_init" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ dict "envAll" $envAll "application" "server" "container" "ingress_vip_kernel_modules" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/ingress-vip.sh
             - kernel_modules
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: ingress-bin
               mountPath: /tmp/ingress-vip.sh
               subPath: ingress-vip.sh
@@ -207,18 +213,16 @@ spec:
               mountPath: /mnt/host-rootfs
               readOnly: true
         - name: ingress-vip-init
-{{ tuple $envAll "ingress" | include "helm-toolkit.snippets.image" | indent 10 }}
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-            runAsUser: 0
+{{ tuple $envAll "ingress_routed_vip" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ dict "envAll" $envAll "application" "server" "container" "ingress_vip_init" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
 {{ include "helm-toolkit.utils.to_k8s_env_vars" .Values.network.vip | indent 12 }}
           command:
             - /tmp/ingress-vip.sh
             - start
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: ingress-bin
               mountPath: /tmp/ingress-vip.sh
               subPath: ingress-vip.sh
@@ -228,15 +232,16 @@ spec:
         - name: ingress
 {{ tuple $envAll "ingress" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.ingress | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "server" "container" "ingress" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           readinessProbe:
             httpGet:
               path: /healthz
-              port: 10254
+              port: {{ tuple "ingress" "internal" "healthz" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
               scheme: HTTP
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 10254
+              port: {{ tuple "ingress" "internal" "healthz" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
               scheme: HTTP
             initialDelaySeconds: 10
             timeoutSeconds: 1
@@ -253,6 +258,12 @@ spec:
               value: {{ tuple "ingress" "internal" "http" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
             - name: PORT_HTTPS
               value: {{ tuple "ingress" "internal" "https" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: PORT_STATUS
+              value: {{ tuple "ingress" "internal" "status" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: PORT_HEALTHZ
+              value: {{ tuple "ingress" "internal" "healthz" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: DEFAULT_SERVER_PORT
+              value: {{ tuple "ingress" "internal" "server" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
             - name: RELEASE_NAME
               value: {{ .Release.Name | quote }}
             - name: ERROR_PAGE_SERVICE
@@ -267,6 +278,18 @@ spec:
             {{- if .Values.network.host_namespace }}
               hostPort: {{ tuple "ingress" "internal" "https" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
             {{- end }}
+            - containerPort: {{ tuple "ingress" "internal" "status" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- if .Values.network.host_namespace }}
+              hostPort: {{ tuple "ingress" "internal" "status" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- end }}
+            - containerPort: {{ tuple "ingress" "internal" "healthz" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- if .Values.network.host_namespace }}
+              hostPort: {{ tuple "ingress" "internal" "healthz" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- end }}
+            - containerPort: {{ tuple "ingress" "internal" "server" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- if .Values.network.host_namespace }}
+              hostPort: {{ tuple "ingress" "internal" "server" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            {{- end }}
           command:
             - /tmp/ingress-controller.sh
             - start
@@ -277,19 +300,17 @@ spec:
                   - /tmp/ingress-controller.sh
                   - stop
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: ingress-bin
               mountPath: /tmp/ingress-controller.sh
               subPath: ingress-controller.sh
               readOnly: true
 {{- if and .Values.network.host_namespace .Values.network.vip.manage }}
         - name: ingress-vip
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-            runAsUser: 0
 {{- if eq .Values.network.vip.mode "routed" }}
-{{ tuple $envAll "ingress" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ tuple $envAll "ingress_routed_vip" | include "helm-toolkit.snippets.image" | indent 10 }}
+{{ dict "envAll" $envAll "application" "server" "container" "ingress_vip" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           env:
 {{ include "helm-toolkit.utils.to_k8s_env_vars" .Values.network.vip | indent 12 }}
           command:
@@ -302,6 +323,8 @@ spec:
                   - /tmp/ingress-vip.sh
                   - stop
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: ingress-bin
               mountPath: /tmp/ingress-vip.sh
               subPath: ingress-vip.sh
@@ -315,9 +338,13 @@ spec:
             value: {{ ( .Values.network.vip.addr | split "/" )._0  | quote }}
           - name: KEEPALIVED_UNICAST_PEERS
             value: null
+          - name: KEEPALIVED_ROUTER_ID
+            value: {{ .Values.network.vip.keepalived_router_id | quote }}
 {{- end }}
 {{- end }}
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: ingress-bin
           configMap:
             name: ingress-bin

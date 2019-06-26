@@ -17,7 +17,7 @@ limitations under the License.
 {{- if .Values.manifests.deployment }}
 {{- $envAll := . }}
 
-{{- $serviceAccountName := printf "%s-%s" .Release.Name "kube-state-metrics"}}
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "kube-state-metrics" }}
 {{ tuple $envAll "kube_state_metrics" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -93,6 +93,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kube-state-metrics
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "kube-state-metrics" "exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -105,8 +107,14 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "kube-state-metrics" "exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "exporter" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "kube-state-metrics" "exporter" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
       nodeSelector:
         {{ .Values.labels.kube_state_metrics.node_selector_key }}: {{ .Values.labels.kube_state_metrics.node_selector_value | quote }}
       terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.kube_state_metrics.timeout | default "30" }}
@@ -116,6 +124,7 @@ spec:
         - name: kube-state-metrics
 {{ tuple $envAll "kube_state_metrics" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.kube_state_metrics | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "exporter" "container" "kube_state_metrics" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/kube-state-metrics.sh
           ports:
@@ -128,11 +137,15 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 10
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: kube-state-metrics-bin
               mountPath: /tmp/kube-state-metrics.sh
               subPath: kube-state-metrics.sh
               readOnly: true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: kube-state-metrics-bin
           configMap:
             name: kube-state-metrics-bin

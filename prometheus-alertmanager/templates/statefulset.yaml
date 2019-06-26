@@ -20,13 +20,15 @@ limitations under the License.
 {{- $mounts_alertmanager := .Values.pod.mounts.alertmanager.alertmanager }}
 {{- $mounts_alertmanager_init := .Values.pod.mounts.alertmanager.init_container }}
 
-{{- $serviceAccountName := "alertmanager"}}
+{{- $serviceAccountName := "alertmanager" }}
 {{ tuple $envAll "alertmanager" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: alertmanager
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "alertmanager" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -40,9 +42,12 @@ spec:
       labels:
 {{ tuple $envAll "alertmanager" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ dict "envAll" $envAll "podName" "alertmanager" "containerNames" (list "alertmanager") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
+{{ dict "envAll" $envAll "application" "server" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "alertmanager" "server" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
@@ -54,20 +59,22 @@ spec:
         - name: alertmanager-perms
 {{ tuple $envAll "alertmanager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.alertmanager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-          securityContext:
-            runAsUser: 0
+{{ dict "envAll" $envAll "application" "server" "container" "alertmanager_perms" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - chown
             - -R
             - "nobody:"
             - /var/lib/alertmanager/data
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: alertmanager-data
               mountPath: /var/lib/alertmanager/data
       containers:
         - name: alertmanager
 {{ tuple $envAll "alertmanager" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.alertmanager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "server" "container" "alertmanager" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/alertmanager.sh
             - start
@@ -94,6 +101,8 @@ spec:
             initialDelaySeconds: 30
             timeoutSeconds: 30
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: etc-alertmanager
               mountPath: /etc/config
             - name: alertmanager-etc
@@ -101,8 +110,8 @@ spec:
               subPath: alert-templates.tmpl
               readOnly: true
             - name: alertmanager-etc
-              mountPath: /etc/config/alertmanager.yml
-              subPath: alertmanager.yml
+              mountPath: /etc/alertmanager/config.yml
+              subPath: config.yml
               readOnly: true
             - name: alertmanager-bin
               mountPath: /tmp/alertmanager.sh
@@ -112,6 +121,8 @@ spec:
               mountPath: /var/lib/alertmanager/data
 {{ if $mounts_alertmanager.volumeMounts }}{{ toYaml $mounts_alertmanager.volumeMounts | indent 12 }}{{ end }}
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: etc-alertmanager
           emptyDir: {}
         - name: alertmanager-etc

@@ -36,6 +36,8 @@ subjects:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
     app: helm
     name: tiller
@@ -56,7 +58,11 @@ spec:
       labels:
         app: helm
         name: tiller
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "tiller" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       initContainers:
 {{ tuple $envAll "tiller" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
       containers:
@@ -77,6 +83,7 @@ spec:
           successThreshold: 1
           timeoutSeconds: 1
         name: tiller
+{{ dict "envAll" $envAll "application" "tiller" "container" "tiller" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 8 }}
         ports:
         - containerPort: 44134
           name: tiller

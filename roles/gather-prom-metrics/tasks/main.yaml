@@ -23,11 +23,12 @@
             SERVICES=$(kubectl get svc -l component=metrics -n $NS -o json | jq -r '.items[].metadata.name')
             for SVC in $SERVICES; do
               PORT=$(kubectl get svc $SVC -n $NS -o json | jq -r '.spec.ports[].port')
-              curl "$SVC.$NS:$PORT/metrics" >> "{{ logs_dir }}"/prometheus/$NS-$SVC.txt
+              curl "$SVC.$NS:$PORT/metrics" >> "{{ logs_dir }}"/prometheus/$NS-$SVC.txt || true
             done
           done
   args:
     executable: /bin/bash
+  ignore_errors: True
 
 - name: "Get prometheus metrics from tiller-deploy"
   shell: |-
@@ -35,6 +36,7 @@
           curl tiller-deploy.kube-system:44135/metrics >> "{{ logs_dir }}"/prometheus/kube-system-tiller-deploy.txt
   args:
     executable: /bin/bash
+  ignore_errors: True
 
 - name: "Downloads logs to executor"
   synchronize:

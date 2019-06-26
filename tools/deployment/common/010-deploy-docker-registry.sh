@@ -30,7 +30,7 @@ storageclass:
   name: openstack-helm-bootstrap
 EOF
 helm upgrade --install docker-registry-nfs-provisioner \
-    ./nfs-provisioner --namespace=docker-registry \
+    ./nfs-provisioner --namespace=docker-nfs \
     --values=/tmp/docker-registry-nfs-provisioner.yaml
 
 #NOTE: Deploy redis for the docker registry
@@ -58,3 +58,6 @@ helm upgrade --install docker-registry ./registry \
 helm status docker-registry-nfs-provisioner
 helm status docker-registry-redis
 helm status docker-registry
+
+#NOTE: Run helm tests
+helm test docker-registry-redis

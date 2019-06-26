@@ -17,6 +17,9 @@ limitations under the License.
 {{- if .Values.manifests.helm_tests }}
 {{- $envAll := . }}
 {{- $esUserSecret := .Values.secrets.elasticsearch.user }}
+
+{{- $serviceAccountName := print .Release.Name "-test" }}
+{{ tuple $envAll "tests" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: v1
 kind: Pod
@@ -26,12 +29,20 @@ metadata:
 {{ tuple $envAll "elasticsearch" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
     "helm.sh/hook": test-success
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
 spec:
+{{ dict "envAll" $envAll "application" "test" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 2 }}
+  serviceAccountName: {{ $serviceAccountName }}
+  nodeSelector:
+    {{ .Values.labels.test.node_selector_key }}: {{ .Values.labels.test.node_selector_value }}
   restartPolicy: Never
+  initContainers:
+{{ tuple $envAll "tests" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 4 }}
   containers:
     - name: {{.Release.Name}}-helm-tests
 {{ tuple $envAll "helm_tests" | include "helm-toolkit.snippets.image" | indent 6 }}
 {{ tuple $envAll $envAll.Values.pod.resources.jobs.tests | include "helm-toolkit.snippets.kubernetes_resources" | indent 6 }}
+{{ dict "envAll" $envAll "application" "test" "container" "helm_tests" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 6 }}
       command:
         - /tmp/helm-tests.sh
       env:
@@ -48,11 +59,15 @@ spec:
         - name: ELASTICSEARCH_ENDPOINT
           value: {{ tuple "elasticsearch" "internal" "http" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}
       volumeMounts:
+        - name: pod-tmp
+          mountPath: /tmp
         - name: elasticsearch-bin
           mountPath: /tmp/helm-tests.sh
           subPath: helm-tests.sh
           readOnly: true
   volumes:
+    - name: pod-tmp
+      emptyDir: {}
     - name: elasticsearch-bin
       configMap:
         name: elasticsearch-bin

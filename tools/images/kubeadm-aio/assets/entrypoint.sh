@@ -18,12 +18,10 @@ set -e
 if [ "x${ACTION}" == "xgenerate-join-cmd" ]; then
 : ${TTL:="10m"}
 DISCOVERY_TOKEN="$(kubeadm token --kubeconfig /etc/kubernetes/admin.conf create --ttl ${TTL} --usages signing,authentication --groups '')"
-TLS_BOOTSTRAP_TOKEN="$(kubeadm token --kubeconfig /etc/kubernetes/admin.conf create --ttl ${TTL} --usages authentication --groups \"system:bootstrappers:kubeadm:default-node-token\")"
 DISCOVERY_TOKEN_CA_HASH="$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* /sha256:/')"
 API_SERVER=$(cat /etc/kubernetes/admin.conf | python -c "import sys, yaml; print yaml.safe_load(sys.stdin)['clusters'][0]['cluster']['server'].split(\"//\",1).pop()")
 exec echo "kubeadm join \
---tls-bootstrap-token ${TLS_BOOTSTRAP_TOKEN} \
---discovery-token ${DISCOVERY_TOKEN} \
+--token ${DISCOVERY_TOKEN} \
 --discovery-token-ca-cert-hash ${DISCOVERY_TOKEN_CA_HASH} \
 ${API_SERVER}"
 elif [ "x${ACTION}" == "xjoin-kube" ]; then
@@ -36,6 +34,7 @@ fi
 : ${CONTAINER_NAME:="null"}
 : ${CONTAINER_RUNTIME:="docker"}
 : ${CNI_ENABLED:="calico"}
+: ${CNI_HOST_IP:="10.96.232.136"}
 : ${NET_SUPPORT_LINUXBRIDGE:="true"}
 : ${PVC_SUPPORT_CEPH:="false"}
 : ${PVC_SUPPORT_NFS:="false"}
@@ -66,7 +65,8 @@ PLAYBOOK_VARS="{
     \"home\": \"${USER_HOME}\"
   },
   \"cluster\": {
-    \"cni\": \"${CNI_ENABLED}\"
+    \"cni\": \"${CNI_ENABLED}\",
+    \"cni_host_ip\": \"${CNI_HOST_IP}\"
   },
   \"kubelet\": {
     \"container_runtime\": \"${CONTAINER_RUNTIME}\",

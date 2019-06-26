@@ -17,7 +17,7 @@ limitations under the License.
 {{- if .Values.manifests.deployment }}
 {{- $envAll := . }}
 
-{{- $serviceAccountName := printf "%s-%s" .Release.Name "nfs-provisioner"}}
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "nfs-provisioner" }}
 {{ tuple $envAll "nfs" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 kind: ClusterRole
@@ -66,9 +66,17 @@ rules:
       - ''
     resources:
       - services
+    verbs:
+      - get
+  - apiGroups:
+      - ''
+    resources:
       - endpoints
     verbs:
       - get
+      - create
+      - update
+      - patch
   - apiGroups:
       - extensions
     resources:
@@ -95,6 +103,8 @@ kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: nfs-provisioner
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "nfs" "provisioner" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -108,6 +118,9 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "nfs" "provisioner" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
@@ -154,9 +167,13 @@ spec:
             {{- end }}
             - "-grace-period=10"
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: export-volume
               mountPath: /export
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: export-volume
           {{- if eq .Values.storage.type "persistentVolumeClaim" }}
           persistentVolumeClaim:

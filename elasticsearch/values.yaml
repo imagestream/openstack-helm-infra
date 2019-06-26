@@ -19,13 +19,18 @@
 images:
   tags:
     apache_proxy: docker.io/httpd:2.4
-    memory_init: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
-    curator:  docker.io/bobrik/curator:5.2.0
-    elasticsearch: docker.io/elasticsearch:5.6.4
-    helm_tests: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    memory_init: docker.io/openstackhelm/heat:newton-ubuntu_xenial
+    curator:  docker.io/bobrik/curator:5.6.0
+    elasticsearch: docker.io/openstackhelm/elasticsearch-s3:latest-5_6_4
+    ceph_key_placement: docker.io/openstackhelm/ceph-config-helper:latest-ubuntu_xenial
+    s3_bucket: docker.io/openstackhelm/ceph-daemon:latest-ubuntu_xenial
+    s3_user: docker.io/openstackhelm/ceph-config-helper:latest-ubuntu_xenial
+    helm_tests: docker.io/openstackhelm/heat:newton-ubuntu_xenial
     prometheus_elasticsearch_exporter: docker.io/justwatch/elasticsearch_exporter:1.0.1
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
-    snapshot_repository: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    snapshot_repository: docker.io/openstackhelm/ceph-config-helper:latest-ubuntu_xenial
+    es_cluster_wait: docker.io/openstackhelm/ceph-config-helper:latest-ubuntu_xenial
+    elasticsearch_templates: docker.io/openstackhelm/heat:newton
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
   local_registry:
@@ -41,6 +46,9 @@ labels:
   job:
     node_selector_key: openstack-control-plane
     node_selector_value: enabled
+  test:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
 
 dependencies:
   dynamic:
@@ -53,13 +61,38 @@ dependencies:
             service: local_image_registry
   static:
     curator:
-      services: null
+      services:
+        - endpoint: internal
+          service: elasticsearch
+        - endpoint: data
+          service: elasticsearch
+        - endpoint: discovery
+          service: elasticsearch
+      jobs:
+        - elasticsearch-register-snapshot-repository
     elasticsearch_client:
-      services: null
+      services:
+        - endpoint: discovery
+          service: elasticsearch
+      jobs: null
     elasticsearch_data:
-      services: null
+      services:
+        - endpoint: internal
+          service: elasticsearch
+        - endpoint: discovery
+          service: elasticsearch
+      jobs: null
     elasticsearch_master:
       services: null
+      jobs: null
+    es_cluster_wait:
+      services:
+        - endpoint: internal
+          service: elasticsearch
+    elasticsearch_templates:
+      services: null
+      jobs:
+        - elasticsearch-cluster-wait
     image_repo_sync:
       services:
         - endpoint: internal
@@ -69,23 +102,120 @@ dependencies:
         - endpoint: internal
           service: elasticsearch
     snapshot_repository:
+      services: null
+      jobs:
+        - elasticsearch-s3-bucket
+        - elasticsearch-cluster-wait
+    s3_user:
       services:
         - endpoint: internal
-          service: elasticsearch
+          service: ceph_object_store
+    s3_bucket:
+      jobs:
+        - elasticsearch-s3-user
+    tests:
+      services: null
+      jobs:
+        - elasticsearch-register-snapshot-repository
 
 pod:
+  mandatory_access_control:
+    type: apparmor
+    elasticsearch-master:
+      elasticsearch-master: localhost/docker-default
+    elasticsearch-data:
+      elasticsearch-data: localhost/docker-default
+    elasticsearch-client:
+      elasticsearch-client: localhost/docker-default
+  security_context:
+    exporter:
+      pod:
+        runAsUser: 99
+      container:
+        elasticsearch_exporter:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    client:
+      pod:
+        runAsUser: 0
+      container:
+        memory_map_increase:
+          privileged: true
+          readOnlyRootFilesystem: true
+        apache_proxy:
+          readOnlyRootFilesystem: false
+        elasticsearch_client:
+          privileged: true
+          capabilities:
+            add:
+              - IPC_LOCK
+              - SYS_RESOURCE
+          readOnlyRootFilesystem: true
+    master:
+      pod:
+        runAsUser: 0
+      container:
+        memory_map_increase:
+          privileged: true
+          readOnlyRootFilesystem: true
+        elasticsearch_master:
+          privileged: true
+          capabilities:
+            add:
+              - IPC_LOCK
+              - SYS_RESOURCE
+          readOnlyRootFilesystem: true
+    es_cluster_wait:
+      pod:
+        runAsUser: 0
+      container:
+        elasticsearch_cluster_wait:
+          readOnlyRootFilesystem: true
+    snapshot_repository:
+      pod:
+        runAsUser: 0
+      container:
+        register_snapshot_repository:
+          readOnlyRootFilesystem: true
+    test:
+      pod:
+        runAsUser: 0
+      container:
+        helm_test:
+          readOnlyRootFilesystem: true
+    data:
+      pod:
+        runAsUser: 0
+      container:
+        memory_map_increase:
+          privileged: true
+          readOnlyRootFilesystem: true
+        elasticsearch_data:
+          privileged: true
+          capabilities:
+            add:
+              - IPC_LOCK
+              - SYS_RESOURCE
+          # NOTE: This was changed from true to false to account for
+          # recovery scenarios when the data pods are unexpectedly lost due to
+          # node outages and shard/index recovery is required
+          readOnlyRootFilesystem: false
   affinity:
-      anti:
-        type:
-          default: preferredDuringSchedulingIgnoredDuringExecution
-        topologyKey:
-          default: kubernetes.io/hostname
+    anti:
+      type:
+        default: preferredDuringSchedulingIgnoredDuringExecution
+      topologyKey:
+        default: kubernetes.io/hostname
+      weight:
+        default: 10
   replicas:
     master: 3
     data: 3
-    client: 2
+    client: 3
   lifecycle:
     upgrades:
+      statefulsets:
+        pod_replacement_strategy: RollingUpdate
       deployments:
         revision_history: 3
         pod_replacement_strategy: RollingUpdate
@@ -96,7 +226,7 @@ pod:
       master:
         timeout: 600
       data:
-        timeout: 600
+        timeout: 1200
       client:
         timeout: 600
       prometheus_elasticsearch_exporter:
@@ -104,6 +234,8 @@ pod:
   mounts:
     elasticsearch:
       elasticsearch:
+    elasticsearch_templates:
+      elasticsearch_templates:
   resources:
     enabled: false
     apache_proxy:
@@ -149,6 +281,13 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
+      elasticsearch_templates:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
       image_repo_sync:
         requests:
           memory: "128Mi"
@@ -163,6 +302,34 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
+      es_cluster_wait:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      storage_init:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      s3_bucket:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      s3_user:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
       tests:
         requests:
           memory: "128Mi"
@@ -171,9 +338,41 @@ pod:
           memory: "1024Mi"
           cpu: "2000m"
 
-secrets:
+network_policy:
   elasticsearch:
-    user: elasticsearch-admin-creds
+    ingress:
+      - {}
+    egress:
+      - {}
+  prometheus-elasticsearch-exporter:
+    ingress:
+      - {}
+    egress:
+      - {}
+
+secrets:
+  rgw:
+    admin: radosgw-s3-admin-creds
+    elasticsearch: elasticsearch-s3-user-creds
+  elasticsearch:
+    user: elasticsearch-user-secrets
+  tls:
+    elasticsearch:
+      elasticsearch:
+        public: elasticsearch-tls-public
+
+jobs:
+  curator:
+    cron: "* */6 * * *"
+    history:
+      success: 3
+      failed: 1
+  es_cluster_wait:
+    backoffLimit: 6
+    activeDeadlineSeconds: 600
+  snapshot_repository:
+    backoffLimit: 6
+    activeDeadlineSeconds: 600
 
 conf:
   httpd: |
@@ -181,6 +380,7 @@ conf:
 
     Listen 80
 
+    LoadModule allowmethods_module modules/mod_allowmethods.so
     LoadModule mpm_event_module modules/mod_mpm_event.so
     LoadModule authn_file_module modules/mod_authn_file.so
     LoadModule authn_core_module modules/mod_authn_core.so
@@ -229,16 +429,18 @@ conf:
     LogLevel warn
 
     <IfModule log_config_module>
-        LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" proxy
         LogFormat "%h %l %u %t \"%r\" %>s %b" common
 
         <IfModule logio_module>
-          LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+          LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
         </IfModule>
 
+        SetEnvIf X-Forwarded-For "^.*\..*\..*\..*" forwarded
         CustomLog /dev/stdout common
-
         CustomLog /dev/stdout combined
+        CustomLog /dev/stdout proxy env=forwarded
     </IfModule>
 
     <Directory "/usr/local/apache2/cgi-bin">
@@ -259,8 +461,6 @@ conf:
       <Location />
           ProxyPass http://localhost:{{ tuple "elasticsearch" "internal" "client" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
           ProxyPassReverse http://localhost:{{ tuple "elasticsearch" "internal" "client" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
-      </Location>
-      <Proxy *>
           AuthName "Elasticsearch"
           AuthType Basic
           AuthBasicProvider file ldap
@@ -269,13 +469,49 @@ conf:
           AuthLDAPBindPassword {{ .Values.endpoints.ldap.auth.admin.password }}
           AuthLDAPURL {{ tuple "ldap" "default" "ldap" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | quote }}
           Require valid-user
-      </Proxy>
+      </Location>
+
+      # Restrict access to the Elasticsearch Update API endpoint to prevent modification of indexed documents
+      <Location /*/_doc/*/_update*>
+          Require all denied
+      </Location>
+      # Restrict access to the Elasticsearch Update By Query API Endpoint to prevent modification of indexed documents
+      <Location /*/_update_by_query*>
+          Require all denied
+      </Location>
+      # Restrict access to the Elasticsearch Delete By Query API Endpoint to prevent deletion of indexed documents
+      <Location /*/_delete_by_query*>
+          Require all denied
+      </Location>
+
+      # Prohibit DELETE methods on the document API endpoint
+      <Location /*/_doc/*>
+          AllowMethods GET POST OPTIONS
+          ProxyPass http://localhost:{{ tuple "elasticsearch" "internal" "client" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
+          ProxyPassReverse http://localhost:{{ tuple "elasticsearch" "internal" "client" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
+          AuthName "Elasticsearch"
+          AuthType Basic
+          AuthBasicProvider file ldap
+          AuthUserFile /usr/local/apache2/conf/.htpasswd
+          AuthLDAPBindDN {{ .Values.endpoints.ldap.auth.admin.bind }}
+          AuthLDAPBindPassword {{ .Values.endpoints.ldap.auth.admin.password }}
+          AuthLDAPURL {{ tuple "ldap" "default" "ldap" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup" | quote }}
+          Require valid-user
+      </Location>
     </VirtualHost>
+  log4j2: |
+    status = error
+    appender.console.type = Console
+    appender.console.name = console
+    appender.console.layout.type = PatternLayout
+    appender.console.layout.pattern = [%d{ISO8601}][%-5p][%-25c{1.}] %marker%m%n
+    rootLogger.level = info
+    rootLogger.appenderRef.console.ref = console
   init:
     max_map_count: 262144
+  ceph:
+    admin_keyring: null
   curator:
-    #run every 6th hour
-    schedule:  "0 */6 * * *"
     action_file:
       # Remember, leave a key empty if there is no value.  None will be a string,
       # not a Python "NoneType"
@@ -283,88 +519,94 @@ conf:
       # Also remember that all examples have 'disable_action' set to True.  If you
       # want to use this action as a template, be sure to set this to False after
       # copying it.
+      #
+      # NOTE(srwilkers): The list of actions below is kept empty, and should be
+      # driven purely by overrides.  As these items are injected as pure YAML,
+      # the desired configuration should include all fields as to avoid unwanted
+      # merges with a set of dummy default values. The supplied values can be
+      # used as an example
       actions:
-        1:
-          action: delete_indices
-          description: >-
-            "Delete indices older than 7 days"
-          options:
-            timeout_override:
-            continue_if_exception: False
-            ignore_empty_list: True
-            disable_action: True
-          filters:
-          - filtertype: pattern
-            kind: prefix
-            value: logstash-
-          - filtertype: age
-            source: name
-            direction: older
-            timestring: '%Y.%m.%d'
-            unit: days
-            unit_count: 7
-        2:
-          action: delete_indices
-          description: >-
-            "Delete indices by age if available disk space is
-             less than 80% total disk"
-          options:
-            timeout_override: 600
-            continue_if_exception: False
-            ignore_empty_list: True
-            disable_action: True
-          filters:
-          - filtertype: pattern
-            kind: prefix
-            value: logstash-
-          - filtertype: space
-            source: creation_date
-            use_age: True
-            # This space assumes the default PVC size of 5Gi times three data
-            # replicas. This must be adjusted if changed due to Curator being
-            # unable to calculate percentages of total disk space
-            disk_space: 12
-        3:
-          action: snapshot
-          description: >-
-            "Snapshot indices older than one day"
-          options:
-            repository: default_repo
-            # Leaving this blank results in the default name format
-            name:
-            wait_for_completion: True
-            max_wait: 3600
-            wait_interval: 10
-            timeout_override: 600
-            ignore_empty_list: True
-            continue_if_exception: False
-            disable_action: True
-          filters:
-          - filtertype: age
-            source: name
-            direction: older
-            timestring: '%Y.%m.%d'
-            unit: days
-            unit_count: 1
-        4:
-          action: delete_snapshots
-          description: >-
-            "Delete snapshots older than 30 days"
-          options:
-            repository: default_repo
-            disable_action: True
-            timeout_override: 600
-            ignore_empty_list: True
-          filters:
-          - filtertype: pattern
-            kind: prefix
-            value: curator-
-            exclude:
-          - filtertype: age
-            source: creation_date
-            direction: older
-            unit: days
-            unit_count: 30
+        # 1:
+        #   action: delete_indices
+        #   description: >-
+        #     "Delete indices older than 7 days"
+        #   options:
+        #     timeout_override:
+        #     continue_if_exception: False
+        #     ignore_empty_list: True
+        #     disable_action: True
+        #   filters:
+        #   - filtertype: pattern
+        #     kind: prefix
+        #     value: logstash-
+        #   - filtertype: age
+        #     source: name
+        #     direction: older
+        #     timestring: '%Y.%m.%d'
+        #     unit: days
+        #     unit_count: 7
+        # 2:
+        #   action: delete_indices
+        #   description: >-
+        #     "Delete indices by age if available disk space is
+        #      less than 80% total disk"
+        #   options:
+        #     timeout_override: 600
+        #     continue_if_exception: False
+        #     ignore_empty_list: True
+        #     disable_action: True
+        #   filters:
+        #   - filtertype: pattern
+        #     kind: prefix
+        #     value: logstash-
+        #   - filtertype: space
+        #     source: creation_date
+        #     use_age: True
+        #     # This space assumes the default PVC size of 5Gi times three data
+        #     # replicas. This must be adjusted if changed due to Curator being
+        #     # unable to calculate percentages of total disk space
+        #     disk_space: 12
+        # 3:
+        #   action: snapshot
+        #   description: >-
+        #     "Snapshot indices older than one day"
+        #   options:
+        #     repository: logstash_snapshots
+        #     # Leaving this blank results in the default name format
+        #     name:
+        #     wait_for_completion: True
+        #     max_wait: 3600
+        #     wait_interval: 10
+        #     timeout_override: 600
+        #     ignore_empty_list: True
+        #     continue_if_exception: False
+        #     disable_action: True
+        #   filters:
+        #   - filtertype: age
+        #     source: name
+        #     direction: older
+        #     timestring: '%Y.%m.%d'
+        #     unit: days
+        #     unit_count: 1
+        # 4:
+        #   action: delete_snapshots
+        #   description: >-
+        #     "Delete snapshots older than 30 days"
+        #   options:
+        #     repository: logstash_snapshots
+        #     disable_action: True
+        #     timeout_override: 600
+        #     ignore_empty_list: True
+        #   filters:
+        #   - filtertype: pattern
+        #     kind: prefix
+        #     value: curator-
+        #     exclude:
+        #   - filtertype: age
+        #     source: creation_date
+        #     direction: older
+        #     unit: days
+        #     unit_count: 30
     config:
       # Remember, leave a key empty if there is no value.  None will be a string,
       # not a Python "NoneType"
@@ -393,7 +635,15 @@ conf:
         compression: true
       network:
         host: 0.0.0.0
+      cloud:
+        aws:
+          protocol: http
+          s3:
+            # NOTE(srwilkers): This gets configured dynamically via endpoint
+            # lookups
+            endpoint: null
       node:
+        ingest: ${NODE_INGEST}
         master: ${NODE_MASTER}
         data: ${NODE_DATA}
         name: ${NODE_NAME}
@@ -401,21 +651,53 @@ conf:
       path:
         data: /usr/share/elasticsearch/data
         logs: /usr/share/elasticsearch/logs
-    repository:
+    snapshots:
       enabled: false
-      name: default_repo
-      location: /var/lib/openstack-helm/elasticsearch
-      type: fs
+      # NOTE(srwilkers): The path for the radosgw s3 endpoint gets populated
+      # dynamically with this value to ensure the bucket name and s3 compatible
+      # radosgw endpoint/path match
+      bucket: elasticsearch_bucket
+      repositories:
+        logstash:
+          name: logstash_snapshots
     env:
-      java_opts: "-Xms256m -Xmx256m"
-  log4j2:
-    override:
-    prefix:
-    append:
+      java_opts:
+        client: "-Xms256m -Xmx256m"
+        data: "-Xms256m -Xmx256m"
+        master: "-Xms256m -Xmx256m"
   prometheus_elasticsearch_exporter:
     es:
       all: true
       timeout: 20s
+  templates:
+    fluent:
+      template: "logstash-*"
+      index_patterns: "logstash-*"
+      settings:
+        number_of_shards: 1
+      mappings:
+        fluent:
+          properties:
+            kubernetes:
+              properties:
+                container_name:
+                  type: keyword
+                  index: false
+                docker_id:
+                  type: keyword
+                  index: false
+                host:
+                  type: keyword
+                  index: false
+                namespace_name:
+                  type: keyword
+                  index: false
+                pod_id:
+                  type: keyword
+                  index: false
+                pod_name:
+                  type: keyword
+                  index: false
 
 endpoints:
   cluster_domain_suffix: cluster.local
@@ -445,6 +727,13 @@ endpoints:
       public: elasticsearch
     host_fqdn_override:
       default: null
+      # NOTE(srwilkers): this chart supports TLS for fqdn over-ridden public
+      # endpoints using the following format:
+      # public:
+      #   host: null
+      #   tls:
+      #     crt: null
+      #     key: null
     path:
       default: null
     scheme:
@@ -485,6 +774,31 @@ endpoints:
     port:
       ldap:
         default: 389
+  ceph_object_store:
+    name: radosgw
+    namespace: null
+    auth:
+      elasticsearch:
+        username: elasticsearch
+        access_key: "elastic_access_key"
+        secret_key: "elastic_secret_key"
+      admin:
+        username: s3_admin
+        access_key: "admin_access_key"
+        secret_key: "admin_secret_key"
+    hosts:
+      default: ceph-rgw
+      public: radosgw
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme:
+      default: http
+    port:
+      api:
+        default: 8088
+        public: 80
 
 monitoring:
   prometheus:
@@ -493,56 +807,56 @@ monitoring:
       scrape: true
 
 network:
-  client:
+  elasticsearch:
+    ingress:
+      public: true
+      classes:
+        namespace: "nginx"
+        cluster: "nginx-cluster"
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
     node_port:
       enabled: false
       port: 30920
-  discovery:
-    node_port:
-      enabled: false
-      port: 30930
-  data:
-    node_port:
-      enabled: false
-      port: 30931
 
 storage:
-  elasticsearch:
-    enabled: true
-    pvc:
-      name: pvc-elastic
-      access_mode: [ "ReadWriteOnce" ]
-    requests:
-      storage: 5Gi
-    storage_class: general
-  filesystem_repository:
-    enabled: false
-    pvc:
-      name: pvc-snapshots
-      access_mode: ReadWriteMany
-    requests:
-      storage: 5Gi
-    storage_class: general
+  enabled: true
+  pvc:
+    name: pvc-elastic
+    access_mode: [ "ReadWriteOnce" ]
+  requests:
+    storage: 5Gi
+  storage_class: general
 
 
 manifests:
-  configmap_bin: true
-  configmap_etc: true
+  configmap_bin_curator: true
+  configmap_bin_elasticsearch: true
+  configmap_etc_curator: true
+  configmap_etc_elasticsearch: true
+  configmap_etc_templates: true
   cron_curator: true
   deployment_client: true
   deployment_master: true
+  ingress: true
+  job_cluster_wait: true
+  job_elasticsearch_templates: true
   job_image_repo_sync: true
-  job_snapshot_repository: false
+  job_snapshot_repository: true
+  job_s3_user: true
+  job_s3_bucket: true
   helm_tests: true
-  pvc_snapshots: false
   secret_elasticsearch: true
+  secret_s3: true
   monitoring:
     prometheus:
       configmap_bin_exporter: true
       deployment_exporter: true
+      network_policy_exporter: false
       service_exporter: true
-  pvc_snapshots: true
+  network_policy: false
   service_data: true
   service_discovery: true
+  service_ingress: true
   service_logging: true
   statefulset_data: true

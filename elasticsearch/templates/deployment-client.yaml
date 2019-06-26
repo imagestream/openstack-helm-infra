@@ -21,7 +21,7 @@ limitations under the License.
 
 {{- $mounts_elasticsearch := .Values.pod.mounts.elasticsearch.elasticsearch }}
 
-{{- $serviceAccountName := printf "%s-%s" .Release.Name "elasticsearch-client"}}
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "elasticsearch-client" }}
 {{ tuple $envAll "elasticsearch_client" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -63,6 +63,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: elasticsearch-client
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "elasticsearch" "client" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -76,9 +78,12 @@ spec:
       labels:
 {{ tuple $envAll "elasticsearch" "client" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
-        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
-        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin-elasticsearch.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-etc-elasticsearch.yaml" . | include "helm-toolkit.utils.hash" }}
+{{ dict "envAll" $envAll "podName" "elasticsearch-client" "containerNames" (list "elasticsearch-client") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
     spec:
+{{ dict "envAll" $envAll "application" "client" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
       affinity:
 {{ tuple $envAll "elasticsearch" "client" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
@@ -90,32 +95,16 @@ spec:
         - name: memory-map-increase
 {{ tuple $envAll "memory_init" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.client | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-          securityContext:
-            privileged: true
-            runAsUser: 0
+{{ dict "envAll" $envAll "application" "client" "container" "memory_map_increase" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
           - sysctl
           - -w
           - vm.max_map_count={{ .Values.conf.init.max_map_count }}
-{{ if .Values.storage.filesystem_repository.enabled }}
-        - name: elasticsearch-repository-perms
-{{ tuple $envAll "elasticsearch" | include "helm-toolkit.snippets.image" | indent 10 }}
-{{ tuple $envAll $envAll.Values.pod.resources.client | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-          securityContext:
-            runAsUser: 0
-          command:
-            - chown
-            - -R
-            - "elasticsearch:"
-            - {{ .Values.conf.elasticsearch.repository.location }}
-          volumeMounts:
-            - name: storage
-              mountPath: {{ .Values.conf.elasticsearch.repository.location }}
-{{ end }}
       containers:
         - name: apache-proxy
 {{ tuple $envAll "apache_proxy" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.apache_proxy | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "client" "container" "apache_proxy" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/apache.sh
             - start
@@ -139,6 +128,8 @@ spec:
                   name: {{ $esUserSecret }}
                   key: ELASTICSEARCH_PASSWORD
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: elasticsearch-bin
               mountPath: /tmp/apache.sh
               subPath: apache.sh
@@ -150,12 +141,7 @@ spec:
         - name: elasticsearch-client
 {{ tuple $envAll "elasticsearch" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.client | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
-          securityContext:
-            privileged: true
-            capabilities:
-              add:
-                - IPC_LOCK
-                - SYS_RESOURCE
+{{ dict "envAll" $envAll "application" "client" "container" "elasticsearch_client" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/elasticsearch.sh
             - start
@@ -190,6 +176,8 @@ spec:
                   fieldPath: metadata.name
             - name: NODE_MASTER
               value: "false"
+            - name: NODE_INGEST
+              value: "false"
             - name: NODE_DATA
               value: "false"
             - name: HTTP_ENABLE
@@ -197,8 +185,10 @@ spec:
             - name: DISCOVERY_SERVICE
               value: {{ tuple "elasticsearch" "discovery" $envAll | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
             - name: ES_JAVA_OPTS
-              value: "{{ .Values.conf.elasticsearch.env.java_opts }}"
+              value: "{{ .Values.conf.elasticsearch.env.java_opts.client }}"
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: elasticsearch-logs
               mountPath: {{ .Values.conf.elasticsearch.config.path.logs }}
             - name: elasticsearch-bin
@@ -217,13 +207,9 @@ spec:
               readOnly: true
             - name: storage
               mountPath: {{ .Values.conf.elasticsearch.config.path.data }}
-            {{ if .Values.storage.filesystem_repository.enabled }}
-            - name: snapshots
-              mountPath: {{ .Values.conf.elasticsearch.repository.location }}
-            {{ end }}
 {{ if $mounts_elasticsearch.volumeMounts }}{{ toYaml $mounts_elasticsearch.volumeMounts | indent 12 }}{{ end }}
       volumes:
-        - name: pod-etc-apache
+        - name: pod-tmp
           emptyDir: {}
         - name: elasticsearch-config
           emptyDir: {}
@@ -234,15 +220,10 @@ spec:
             name: elasticsearch-bin
             defaultMode: 0555
         - name: elasticsearch-etc
-          configMap:
-            name: elasticsearch-etc
+          secret:
+            secretName: elasticsearch-etc
             defaultMode: 0444
         - name: storage
           emptyDir: {}
-        {{ if .Values.storage.filesystem_repository.enabled }}
-        - name: snapshots
-          persistentVolumeClaim:
-            claimName: {{ .Values.storage.filesystem_repository.pvc.name }}
-        {{ end }}
 {{ if $mounts_elasticsearch.volumes }}{{ toYaml $mounts_elasticsearch.volumes | indent 8 }}{{ end }}
 {{- end }}

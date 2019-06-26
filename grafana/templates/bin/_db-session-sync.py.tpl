@@ -10,7 +10,6 @@
 
 import os
 import sys
-import ConfigParser
 import logging
 from sqlalchemy import create_engine
 
@@ -19,7 +18,7 @@ logger = logging.getLogger('OpenStack-Helm DB Init')
 logger.setLevel(logging.DEBUG)
 ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(filename)s - %(lineno)d - %(funcName)s - %(message)s')
 
 # Set the formatter and add the handler
 ch.setFormatter(formatter)

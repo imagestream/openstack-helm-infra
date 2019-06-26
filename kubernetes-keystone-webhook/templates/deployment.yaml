@@ -21,6 +21,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubernetes-keystone-webhook
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "kubernetes-keystone-webhook" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -33,13 +35,17 @@ spec:
       labels:
 {{ tuple $envAll "kubernetes-keystone-webhook" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
         configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
         configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
+{{ dict "envAll" $envAll "application" "kubernetes-keystone-webhook" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       containers:
         - name: kubernetes-keystone-webhook
 {{ tuple $envAll "kubernetes_keystone_webhook" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.server | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          securityContext:
+            allowPrivilegeEscalation: false
           command:
             - /tmp/start.sh
           readinessProbe:
@@ -51,6 +57,8 @@ spec:
             - name: k8sksauth-pub
               containerPort: {{ tuple "kubernetes_keystone_webhook" "internal" "api" $envAll | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: etc-kubernetes-keystone-webhook
               mountPath: /etc/kubernetes-keystone-webhook
             - name: key-kubernetes-keystone-webhook
@@ -70,6 +78,8 @@ spec:
               subPath: start.sh
               readOnly: true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: etc-kubernetes-keystone-webhook
           emptyDir: {}
         - name: key-kubernetes-keystone-webhook

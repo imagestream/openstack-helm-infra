@@ -17,13 +17,15 @@ limitations under the License.
 {{- if .Values.manifests.deployment }}
 {{- $envAll := . }}
 
-{{- $serviceAccountName := "redis"}}
+{{- $serviceAccountName := "redis" }}
 {{ tuple $envAll "redis" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: redis
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -36,6 +38,9 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "redis" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
     spec:
       serviceAccountName: {{ $serviceAccountName }}
       affinity:

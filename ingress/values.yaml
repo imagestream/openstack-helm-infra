@@ -26,10 +26,11 @@ deployment:
 images:
   tags:
     entrypoint: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
-    # https://github.com/kubernetes/ingress-nginx/blob/09524cd3363693463da5bf4a9bb3900da435ad05/Changelog.md#090
-    ingress: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.9.0
+    ingress: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.23.0
+    ingress_module_init: docker.io/openstackhelm/neutron:ocata-ubuntu_xenial
+    ingress_routed_vip: docker.io/openstackhelm/neutron:ocata-ubuntu_xenial
     error_pages: gcr.io/google_containers/defaultbackend:1.0
-    keepalived: osixia/keepalived:1.4.5
+    keepalived: docker.io/osixia/keepalived:1.4.5
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
     image_repo_sync: docker.io/docker:17.07.0
   pull_policy: "IfNotPresent"
@@ -40,12 +41,47 @@ images:
       - image_repo_sync
 
 pod:
+  security_context:
+    error_pages:
+      pod:
+        runAsUser: 65534
+      container:
+        ingress_error_pages:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    server:
+      pod:
+        runAsUser: 65534
+      container:
+        ingress_vip_kernel_modules:
+          capabilities:
+            add:
+              - SYS_MODULE
+          readOnlyRootFilesystem: true
+          runAsUser: 0
+        ingress_vip_init:
+          capabilities:
+            add:
+              - NET_ADMIN
+          readOnlyRootFilesystem: true
+          runAsUser: 0
+        ingress:
+          readOnlyRootFilesystem: false
+          runAsUser: 0
+        ingress_vip:
+          capabilities:
+            add:
+              - NET_ADMIN
+          readOnlyRootFilesystem: true
+          runAsUser: 0
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   replicas:
     ingress: 1
     error_page: 1
@@ -104,12 +140,16 @@ network:
     mode: routed
     interface: ingress-vip
     addr: 172.18.0.1/32
+    keepalived_router_id: 100
   ingress:
     annotations:
       #NOTE(portdirect): if left blank this is populated from
       # .deployment.cluster.class
       kubernetes.io/ingress.class: null
       nginx.ingress.kubernetes.io/proxy-body-size: "0"
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        more_set_headers "X-Content-Type-Options: nosniff";
+        more_set_headers "X-Frame-Options: deny";
   external_policy_local: false
 
 dependencies:
@@ -136,6 +176,7 @@ monitoring:
     enabled: true
     ingress_exporter:
       scrape: true
+      port: 10254
 
 endpoints:
   cluster_domain_suffix: cluster.local
@@ -162,6 +203,12 @@ endpoints:
         default: 80
       https:
         default: 443
+      healthz:
+        default: 10254
+      status:
+        default: 18080
+      server:
+        default: 8181
   ingress_exporter:
     namespace: null
     hosts:
@@ -175,6 +222,27 @@ endpoints:
     port:
       metrics:
         default: 10254
+  kube_dns:
+    namespace: kube-system
+    name: kubernetes-dns
+    hosts:
+      default: kube-dns
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme: http
+    port:
+      dns_tcp:
+        default: 53
+      dns:
+        default: 53
+        protocol: UDP
+
+network_policy:
+  ingress:
+    ingress:
+      - {}
 
 conf:
   controller:
@@ -190,6 +258,7 @@ conf:
     # an empty string (the default).
     bind-address: null
     enable-vts-status: "true"
+    server-tokens: "false"
   services:
     tcp: null
     udp: null
@@ -209,3 +278,4 @@ manifests:
   monitoring:
     prometheus:
       service_exporter: true
+  network_policy: false

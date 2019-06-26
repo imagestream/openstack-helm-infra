@@ -38,44 +38,37 @@ function create_test_index () {
   fi
 }
 
-function insert_data_into_test_index () {
-  insert_result=$(curl -K- <<< "--user ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}" \
-  -XPUT "${ELASTICSEARCH_ENDPOINT}/test_index/sample_type/123/_create?pretty" -H 'Content-Type: application/json' -d'
-  {
-      "name" : "Elasticsearch",
-      "message" : "Test data text entry"
-  }
-  ' | python -c "import sys, json; print json.load(sys.stdin)['result']")
-  if [ "$insert_result" == "created" ]; then
-     sleep 20
-     echo "PASS: Test data inserted into test index!";
+function check_snapshot_repositories () {
+  {{ range $repository := .Values.conf.elasticsearch.snapshots.repositories }}
+  repository={{$repository.name}}
+  repository_search_result=$(curl -K- <<< "--user ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}" \
+  "${ELASTICSEARCH_ENDPOINT}/_cat/repositories" | awk '{print $1}' | grep "\<$repository\>")
+  if [ "$repository_search_result" == "$repository" ]; then
+     echo "PASS: The snapshot repository $repository exists!"
   else
-     echo "FAIL: Test data not inserted into test index!";
+     echo "FAIL: The snapshot repository $respository does not exist! Exiting now";
      exit 1;
   fi
+  {{ end }}
 }
 
-function check_hits_on_test_data () {
-  total_hits=$(curl -K- <<< "--user ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}" \
-  "${ELASTICSEARCH_ENDPOINT}/_search?pretty" -H 'Content-Type: application/json' -d'
-  {
-    "query" : {
-      "bool": {
-        "must": [
-          { "match": { "name": "Elasticsearch" }},
-          { "match": { "message": "Test data text entry" }}
-        ]
-      }
-    }
-  }
-  ' | python -c "import sys, json; print json.load(sys.stdin)['hits']['total']")
-  if [ "$total_hits" -gt 0 ]; then
-     echo "PASS: Successful hits on test data query!"
+{{ if and (.Values.manifests.job_elasticsearch_templates) (not (empty .Values.conf.templates)) }}
+# Tests whether elasticsearch has successfully generated the elasticsearch index mapping
+# templates defined by values.yaml
+function check_templates () {
+  {{ range $template, $fields := .Values.conf.templates }}
+  {{$template}}_total_hits=$(curl -K- <<< "--user ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD}" \
+              -XGET "${ELASTICSEARCH_ENDPOINT}/_template/{{$template}}" -H 'Content-Type: application/json' \
+              | python -c "import sys, json; print len(json.load(sys.stdin))")
+  if [ "${{$template}}_total_hits" -gt 0 ]; then
+     echo "PASS: Successful hits on {{$template}} template!"
   else
-     echo "FAIL: No hits on query for test data! Exiting";
+     echo "FAIL: No hits on query for {{$template}} template! Exiting";
      exit 1;
   fi
+  {{ end }}
 }
+{{ end }}
 
 function remove_test_index () {
   echo "Deleting index created for service testing"
@@ -83,7 +76,10 @@ function remove_test_index () {
   -XDELETE "${ELASTICSEARCH_ENDPOINT}/test_index"
 }
 
+remove_test_index || true
 create_test_index
-insert_data_into_test_index
-check_hits_on_test_data
+{{ if .Values.conf.elasticsearch.snapshots.enabled }}
+check_snapshot_repositories
+{{ end }}
+check_templates
 remove_test_index

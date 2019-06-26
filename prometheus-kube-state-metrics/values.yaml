@@ -37,12 +37,22 @@ labels:
     node_selector_value: enabled
 
 pod:
+  security_context:
+    exporter:
+      pod:
+        runAsUser: 65534
+      container:
+        kube_state_metrics:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   mounts:
     kube_state_metrics:
       kube_state_metrics:
@@ -152,6 +162,7 @@ manifests:
   configmap_bin: true
   deployment: true
   job_image_repo_sync: true
+  network_policy: false
   service_kube_state_metrics: true
   service_controller_manager: true
   service_scheduler: true

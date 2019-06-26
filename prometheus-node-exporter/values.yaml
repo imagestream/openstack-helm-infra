@@ -37,6 +37,14 @@ labels:
     node_selector_value: enabled
 
 pod:
+  security_context:
+    metrics:
+      pod:
+        runAsUser: 65534
+      container:
+        node_exporter:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
   affinity:
     anti:
       type:
@@ -79,7 +87,14 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
-
+  tolerations:
+    node_exporter:
+      enabled: false
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+      - key: node-role.kubernetes.io/node
+        operator: Exists
 dependencies:
   dynamic:
     common:
@@ -139,3 +154,12 @@ manifests:
 
 conf:
   ntp_server_ip: 127.0.0.1
+  collectors:
+    enable:
+      - ntp
+      - meminfo_numa
+      - bonding
+      - mountstats
+    disable:
+    textfile:
+      directory: /var/log/node-exporter-vfstats

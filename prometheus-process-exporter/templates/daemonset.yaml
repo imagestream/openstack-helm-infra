@@ -17,7 +17,7 @@ limitations under the License.
 {{- if .Values.manifests.daemonset }}
 {{- $envAll := . }}
 
-{{- $serviceAccountName := printf "%s-%s" .Release.Name "process-exporter"}}
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "process-exporter" }}
 {{ tuple $envAll "process_exporter" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -37,6 +37,8 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: process-exporter
+  annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
   labels:
 {{ tuple $envAll "process_exporter" "metrics" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
 spec:
@@ -48,10 +50,18 @@ spec:
     metadata:
       labels:
 {{ tuple $envAll "process_exporter" "metrics" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+{{ dict "envAll" $envAll "podName" "process-exporter" "containerNames" (list "process-exporter") | include "helm-toolkit.snippets.kubernetes_mandatory_access_control_annotation" | indent 8 }}
+{{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" | indent 8 }}
     spec:
+{{ dict "envAll" $envAll "application" "metrics" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
       serviceAccountName: {{ $serviceAccountName }}
+{{ if .Values.pod.tolerations.process_exporter.enabled }}
+{{ tuple $envAll "process_exporter" | include "helm-toolkit.snippets.kubernetes_tolerations" | indent 6 }}
+{{ else }}
       nodeSelector:
         {{ .Values.labels.process_exporter.node_selector_key }}: {{ .Values.labels.process_exporter.node_selector_value }}
+{{ end }}
       hostNetwork: true
       hostPID: true
       initContainers:
@@ -60,6 +70,7 @@ spec:
         - name: process-exporter
 {{ tuple $envAll "process_exporter" | include "helm-toolkit.snippets.image" | indent 10 }}
 {{ tuple $envAll $envAll.Values.pod.resources.process_exporter | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "metrics" "container" "process_exporter" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           args:
             - -procnames
             - {{ .Values.conf.processes }}
@@ -73,10 +84,14 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 10
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: proc
               mountPath: /host/proc
               readOnly:  true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: proc
           hostPath:
             path: /proc

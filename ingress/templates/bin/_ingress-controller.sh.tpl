@@ -20,6 +20,7 @@ set -ex
 COMMAND="${@:-start}"
 
 function start () {
+  rm -fv /tmp/prometheus-nginx.socket
   exec /usr/bin/dumb-init \
       /nginx-ingress-controller \
       {{- if eq .Values.deployment.mode "namespace" }}
@@ -27,6 +28,9 @@ function start () {
       {{- end }}
       --http-port=${PORT_HTTP} \
       --https-port=${PORT_HTTPS} \
+      --healthz-port=${PORT_HEALTHZ} \
+      --status-port=${PORT_STATUS} \
+      --default-server-port=${DEFAULT_SERVER_PORT} \
       --election-id=${RELEASE_NAME} \
       --ingress-class=${INGRESS_CLASS} \
       --default-backend-service=${POD_NAMESPACE}/${ERROR_PAGE_SERVICE} \

@@ -17,6 +17,9 @@ limitations under the License.
 {{- if .Values.manifests.helm_tests }}
 {{- $envAll := . }}
 {{- $promUserSecret := .Values.secrets.prometheus.admin }}
+
+{{- $serviceAccountName := print .Release.Name "-test" }}
+{{ tuple $envAll "tests" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
 ---
 apiVersion: v1
 kind: Pod
@@ -25,9 +28,15 @@ metadata:
   labels:
 {{ tuple $envAll "prometheus" "test" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 4 }}
   annotations:
+    {{ tuple $envAll | include "helm-toolkit.snippets.release_uuid" }}
     "helm.sh/hook": test-success
 spec:
+  serviceAccountName: {{ $serviceAccountName }}
+  nodeSelector:
+    {{ .Values.labels.test.node_selector_key }}: {{ .Values.labels.test.node_selector_value }}
   restartPolicy: Never
+  initContainers:
+{{ tuple $envAll "tests" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 4 }}
   containers:
     - name: {{.Release.Name}}-helm-tests
 {{ tuple $envAll "helm_tests" | include "helm-toolkit.snippets.image" | indent 6 }}
@@ -48,11 +57,15 @@ spec:
         - name: PROMETHEUS_ENDPOINT
           value: {{ tuple "monitoring" "internal" "http" $envAll | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}
       volumeMounts:
+        - name: pod-tmp
+          mountPath: /tmp
         - name: prometheus-bin
           mountPath: /tmp/helm-tests.sh
           subPath: helm-tests.sh
           readOnly: true
   volumes:
+    - name: pod-tmp
+      emptyDir: {}
     - name: prometheus-bin
       configMap:
         name: prometheus-bin

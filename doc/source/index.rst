@@ -7,7 +7,10 @@ Contents:
    :maxdepth: 2
 
    install/index
-
+   testing/index
+   monitoring/index
+   logging/index
+   readme
 
 Indices and Tables
 ==================

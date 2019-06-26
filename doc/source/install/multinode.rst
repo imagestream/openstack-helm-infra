@@ -1,6 +1,6 @@
-====================
-Multinode Deployment
-====================
+======================
+Development Deployment
+======================
 
 Deploy Local Docker Registry
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -15,171 +15,223 @@ Alternatively, this step can be performed by running the script directly:
 
   ./tools/deployment/multinode/010-deploy-docker-registry.sh
 
-  Deploy Cluster and Namespace Ingress Controllers
-  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Deploy Cluster and Namespace Ingress Controllers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/020-ingress.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/020-ingress.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/020-ingress.sh
+  ./tools/deployment/multinode/020-ingress.sh
 
-  Deploy NFS Provisioner for LMA Services
-  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Deploy Ceph
+^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/030-lma-nfs-provisioner.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/030-ceph.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/030-lma-nfs-provisioner.sh
+  ./tools/deployment/multinode/030-ceph.sh
 
-  Deploy LDAP
-  ^^^^^^^^^^^
+Activate the OSH-Infra namespace to be able to use Ceph
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/040-ldap.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/035-ceph-ns-activate.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/040-ldap.sh
+  ./tools/deployment/multinode/035-ceph-ns-activate.sh
 
-  Deploy Prometheus
-  ^^^^^^^^^^^^^^^^^
+Deploy LDAP
+^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/050-prometheus.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/040-ldap.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/050-prometheus.sh
+  ./tools/deployment/multinode/040-ldap.sh
 
-  Deploy Alertmanager
-  ^^^^^^^^^^^^^^^^^^^
+Deploy MariaDB
+^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/060-alertmanager.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/045-mariadb.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/060-alertmanager.sh
+  ./tools/deployment/multinode/045-mariadb.sh
 
-  Deploy Kube-State-Metrics
-  ^^^^^^^^^^^^^^^^^^^^^^^^^
+Deploy Prometheus
+^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/070-kube-state-metrics.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/050-prometheus.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/070-kube-state-metrics.sh
+  ./tools/deployment/multinode/050-prometheus.sh
 
-  Deploy Node Exporter
-  ^^^^^^^^^^^^^^^^^^^^
+Deploy Alertmanager
+^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/080-node-exporter.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/060-alertmanager.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/080-node-exporter.sh
+  ./tools/deployment/multinode/060-alertmanager.sh
 
-  Deploy OpenStack Exporter
-  ^^^^^^^^^^^^^^^^^^^^^^^^^
+Deploy Kube-State-Metrics
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/090-openstack-exporter.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/070-kube-state-metrics.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/090-openstack-exporter.sh
+  ./tools/deployment/multinode/070-kube-state-metrics.sh
 
-  Deploy Grafana
-  ^^^^^^^^^^^^^^
+Deploy Node Exporter
+^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/100-grafana.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/080-node-exporter.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/100-grafana.sh
+  ./tools/deployment/multinode/080-node-exporter.sh
 
-  Deploy Nagios
-  ^^^^^^^^^^^^^
+Deploy Process Exporter
+^^^^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/110-nagios.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/085-process-exporter.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/110-nagios.sh
+  ./tools/deployment/multinode/085-process-exporter.sh
 
-  Deploy Elasticsearch
-  ^^^^^^^^^^^^^^^^^^^^
+Deploy OpenStack Exporter
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/120-elasticsearch.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/090-openstack-exporter.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/120-elasticsearch.sh
+  ./tools/deployment/multinode/090-openstack-exporter.sh
 
-  Deploy Fluent-Logging
-  ^^^^^^^^^^^^^^^^^^^^^
+Deploy Grafana
+^^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/130-fluent-logging.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/100-grafana.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/130-fluent-logging.sh
+  ./tools/deployment/multinode/100-grafana.sh
 
-  Deploy Kibana
-  ^^^^^^^^^^^^^
+Deploy Nagios
+^^^^^^^^^^^^^
 
-  .. literalinclude:: ../../../tools/deployment/multinode/140-kibana.sh
-      :language: shell
-      :lines: 1,17-
+.. literalinclude:: ../../../tools/deployment/multinode/110-nagios.sh
+    :language: shell
+    :lines: 1,17-
 
-  Alternatively, this step can be performed by running the script directly:
+Alternatively, this step can be performed by running the script directly:
 
-  .. code-block:: shell
+.. code-block:: shell
 
-    ./tools/deployment/multinode/140-kibana.sh
+  ./tools/deployment/multinode/110-nagios.sh
+
+Deploy Rados Gateway for OSH-Infra
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. literalinclude:: ../../../tools/deployment/multinode/115-radosgw-osh-infra.sh
+    :language: shell
+    :lines: 1,17-
+
+Alternatively, this step can be performed by running the script directly:
+
+.. code-block:: shell
+
+  ./tools/deployment/multinode/115-radosgw-osh-infra.sh
+
+Deploy Elasticsearch
+^^^^^^^^^^^^^^^^^^^^
+
+.. literalinclude:: ../../../tools/deployment/multinode/120-elasticsearch.sh
+    :language: shell
+    :lines: 1,17-
+
+Alternatively, this step can be performed by running the script directly:
+
+.. code-block:: shell
+
+  ./tools/deployment/multinode/120-elasticsearch.sh
+
+Deploy Fluentbit
+^^^^^^^^^^^^^^^^
+
+.. literalinclude:: ../../../tools/deployment/multinode/125-fluentbit.sh
+    :language: shell
+    :lines: 1,17-
+
+Alternatively, this step can be performed by running the script directly:
+
+.. code-block:: shell
+
+  ./tools/deployment/multinode/125-fluentbit.sh
+
+Deploy Fluentd
+^^^^^^^^^^^^^^
+
+.. literalinclude:: ../../../tools/deployment/multinode/135-fluentd-deployment.sh
+    :language: shell
+    :lines: 1,17-
+
+Alternatively, this step can be performed by running the script directly:
+
+.. code-block:: shell
+
+  ./tools/deployment/multinode/135-fluentd-deployment.sh

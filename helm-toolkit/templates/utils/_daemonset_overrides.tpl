@@ -21,7 +21,6 @@ limitations under the License.
   {{- $configmap_name := index . 3 }}
   {{- $context := index . 4 }}
   {{- $_ := unset $context ".Files" }}
-  {{- $_ := set $context.Values "__daemonset_yaml" $daemonset_yaml }}
   {{- $daemonset_root_name := printf (print $context.Chart.Name "_" $daemonset) }}
   {{- $_ := set $context.Values "__daemonset_list" list }}
   {{- $_ := set $context.Values "__default" dict }}
@@ -38,15 +37,21 @@ limitations under the License.
               {{- $current_dict := dict }}
 
               {{/* set daemonset name */}}
-              {{- $_ := set $current_dict "name" $host_data.name }}
+              {{/* Note: long hostnames can cause the 63 char name limit to be
+              exceeded. Truncate the hostname if hostname > 20 char */}}
+              {{- if gt (len $host_data.name) 20 }}
+                {{- $_ := set $current_dict "name" (substr 0 20 $host_data.name) }}
+              {{- else }}
+                {{- $_ := set $current_dict "name" $host_data.name }}
+              {{- end }}
 
               {{/* apply overrides */}}
               {{- $override_conf_copy := $host_data.conf }}
               {{- $root_conf_copy := omit $context.Values.conf "overrides" }}
-              {{- $merged_dict := merge $override_conf_copy $root_conf_copy }}
+              {{- $merged_dict := mergeOverwrite $root_conf_copy $override_conf_copy }}
               {{- $root_conf_copy2 := dict "conf" $merged_dict }}
               {{- $context_values := omit $context.Values "conf" }}
-              {{- $root_conf_copy3 := merge $context_values $root_conf_copy2 }}
+              {{- $root_conf_copy3 := mergeOverwrite $context_values $root_conf_copy2 }}
               {{- $root_conf_copy4 := dict "Values" $root_conf_copy3 }}
               {{- $_ := set $current_dict "nodeData" $root_conf_copy4 }}
 
@@ -82,10 +87,10 @@ limitations under the License.
               {{/* apply overrides */}}
               {{- $override_conf_copy := $label_data.conf }}
               {{- $root_conf_copy := omit $context.Values.conf "overrides" }}
-              {{- $merged_dict := merge $override_conf_copy $root_conf_copy }}
+              {{- $merged_dict := mergeOverwrite $root_conf_copy $override_conf_copy }}
               {{- $root_conf_copy2 := dict "conf" $merged_dict }}
               {{- $context_values := omit $context.Values "conf" }}
-              {{- $root_conf_copy3 := merge $context_values $root_conf_copy2 }}
+              {{- $root_conf_copy3 := mergeOverwrite $context_values $root_conf_copy2 }}
               {{- $root_conf_copy4 := dict "Values" $root_conf_copy3 }}
               {{- $_ := set $context.Values.__current_label "nodeData" $root_conf_copy4 }}
 
@@ -180,7 +185,7 @@ limitations under the License.
   {{- $root_conf_copy1 := omit $context.Values.conf "overrides" }}
   {{- $root_conf_copy2 := dict "conf" $root_conf_copy1 }}
   {{- $context_values := omit $context.Values "conf" }}
-  {{- $root_conf_copy3 := merge $context_values $root_conf_copy2 }}
+  {{- $root_conf_copy3 := mergeOverwrite $context_values $root_conf_copy2 }}
   {{- $root_conf_copy4 := dict "Values" $root_conf_copy3 }}
   {{- $_ := set $context.Values.__default "nodeData" $root_conf_copy4 }}
 
@@ -188,12 +193,13 @@ limitations under the License.
   {{- $list_aggregate := append $context.Values.__daemonset_list $context.Values.__default }}
   {{- $_ := set $context.Values "__daemonset_list" $list_aggregate }}
 
-  {{- $_ := set $context.Values "__last_configmap_name" $configmap_name }}
   {{- range $current_dict := $context.Values.__daemonset_list }}
 
     {{- $context_novalues := omit $context "Values" }}
-    {{- $merged_dict := merge $current_dict.nodeData $context_novalues }}
+    {{- $merged_dict := mergeOverwrite $context_novalues $current_dict.nodeData }}
     {{- $_ := set $current_dict "nodeData" $merged_dict }}
+    {{/* Deep copy original daemonset_yaml */}}
+    {{- $_ := set $context.Values "__daemonset_yaml" ($daemonset_yaml | toYaml | fromYaml) }}
 
     {{/* name needs to be a DNS-1123 compliant name. Ensure lower case */}}
     {{- $name_format1 := printf (print $daemonset_root_name "-" $current_dict.name) | lower }}
@@ -228,9 +234,9 @@ limitations under the License.
     {{- $_ := set $context.Values "__volume_list" list }}
     {{- range $current_volume := $context.Values.__daemonset_yaml.spec.template.spec.volumes }}
       {{- $_ := set $context.Values "__volume" $current_volume }}
-      {{- if hasKey $context.Values.__volume "configMap" }}
-        {{- if eq $context.Values.__volume.configMap.name $context.Values.__last_configmap_name }}
-          {{- $_ := set $context.Values.__volume.configMap "name" $current_dict.dns_1123_name }}
+      {{- if hasKey $context.Values.__volume "secret" }}
+        {{- if eq $context.Values.__volume.secret.secretName $configmap_name }}
+          {{- $_ := set $context.Values.__volume.secret "secretName" $current_dict.dns_1123_name }}
         {{- end }}
       {{- end }}
       {{- $updated_list := append $context.Values.__volume_list $context.Values.__volume }}
@@ -266,6 +272,5 @@ limitations under the License.
     {{/* generate daemonset yaml */}}
 ---
 {{ $context.Values.__daemonset_yaml | toYaml }}
-    {{- $_ := set $context.Values "__last_configmap_name" $current_dict.dns_1123_name }}
   {{- end }}
 {{- end }}

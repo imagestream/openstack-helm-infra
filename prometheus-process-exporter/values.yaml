@@ -37,12 +37,22 @@ labels:
     node_selector_value: enabled
 
 pod:
+  security_context:
+    metrics:
+      pod:
+        runAsUser: 65534
+      container:
+        process_exporter:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   mounts:
     process_exporter:
       process_exporter:
@@ -79,7 +89,14 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
-
+  tolerations:
+    process_exporter:
+      enabled: false
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+      - key: node-role.kubernetes.io/node
+        operator: Exists
 dependencies:
   dynamic:
     common:

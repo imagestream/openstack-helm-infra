@@ -21,23 +21,52 @@ make elasticsearch
 
 #NOTE: Deploy command
 tee /tmp/elasticsearch.yaml << EOF
-storage:
-  elasticsearch:
-    storage_class: openstack-helm-lma-nfs
+pod:
+  replicas:
+    data: 1
+    master: 2
 conf:
   elasticsearch:
     env:
-      java_opts: "-Xms512m -Xmx512m"
+      java_opts:
+        client: "-Xms512m -Xmx512m"
+        data: "-Xms512m -Xmx512m"
+        master: "-Xms512m -Xmx512m"
+    snapshots:
+      enabled: true
+  curator:
+    action_file:
+      actions:
+        1:
+          action: delete_indices
+          description: >-
+            "Delete indices older than 365 days"
+          options:
+            timeout_override:
+            continue_if_exception: False
+            ignore_empty_list: True
+            disable_action: True
+          filters:
+          - filtertype: pattern
+            kind: prefix
+            value: logstash-
+          - filtertype: age
+            source: name
+            direction: older
+            timestring: '%Y.%m.%d'
+            unit: days
+            unit_count: 365
 monitoring:
   prometheus:
     enabled: true
+
 EOF
 helm upgrade --install elasticsearch ./elasticsearch \
-    --namespace=openstack \
+    --namespace=osh-infra \
     --values=/tmp/elasticsearch.yaml
 
 #NOTE: Wait for deploy
-./tools/deployment/common/wait-for-pods.sh openstack
+./tools/deployment/common/wait-for-pods.sh osh-infra
 
 #NOTE: Validate Deployment info
 helm status elasticsearch

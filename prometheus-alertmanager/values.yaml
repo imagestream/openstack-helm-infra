@@ -38,18 +38,31 @@ labels:
     node_selector_value: enabled
 
 pod:
+  security_context:
+    server:
+      pod:
+        runAsUser: 65534
+      container:
+        alertmanager_perms:
+          runAsUser: 0
+          readOnlyRootFilesystem: true
+        alertmanager:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   mounts:
     alertmanager:
       alertmanager:
       init_container: null
   replicas:
-    alertmanager: 3
+    alertmanager: 1
   lifecycle:
     upgrades:
       revision_history: 3
@@ -169,6 +182,7 @@ manifests:
   configmap_etc: true
   ingress: true
   job_image_repo_sync: true
+  network_policy: false
   secret_ingress_tls: true
   service: true
   service_discovery: true
@@ -297,4 +311,4 @@ conf:
             room_id: 85
             message_format: html
             notify: true
-  alertmanager_templates: null
+  alert_templates: null

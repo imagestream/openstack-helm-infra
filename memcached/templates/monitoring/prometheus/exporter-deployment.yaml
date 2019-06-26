@@ -40,6 +40,8 @@ spec:
 {{ tuple $envAll "prometheus_memcached_exporter" "exporter" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
       namespace: {{ .Values.endpoints.prometheus_memcached_exporter.namespace }}
     spec:
+{{ dict "envAll" $envAll "application" "memcached_exporter" | include "helm-toolkit.snippets.kubernetes_pod_security_context" | indent 6 }}
+      shareProcessNamespace: true
       serviceAccountName: {{ $rcControllerName | quote }}
       nodeSelector:
         {{ .Values.labels.prometheus_memcached_exporter.node_selector_key }}: {{ .Values.labels.prometheus_memcached_exporter.node_selector_value | quote }}
@@ -51,6 +53,7 @@ spec:
           image: {{ .Values.images.tags.prometheus_memcached_exporter }}
           imagePullPolicy: {{ .Values.images.pull_policy }}
 {{ tuple $envAll $envAll.Values.pod.resources.prometheus_memcached_exporter | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+{{ dict "envAll" $envAll "application" "memcached_exporter" "container" "memcached_exporter" | include "helm-toolkit.snippets.kubernetes_container_security_context" | indent 10 }}
           command:
             - /tmp/memcached-exporter.sh
             - start
@@ -61,11 +64,15 @@ spec:
           - name: MEMCACHED_HOST
             value: {{ tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" }}
           volumeMounts:
+            - name: pod-tmp
+              mountPath: /tmp
             - name: memcached-exporter-bin
               mountPath: /tmp/memcached-exporter.sh
               subPath: memcached-exporter.sh
               readOnly: true
       volumes:
+        - name: pod-tmp
+          emptyDir: {}
         - name: memcached-exporter-bin
           configMap:
             name: {{ $configMapBinName | quote }}

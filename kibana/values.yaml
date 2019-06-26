@@ -26,6 +26,7 @@ images:
     kibana: docker.io/kibana:5.6.4
     dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
     image_repo_sync: docker.io/docker:17.07.0
+    register_kibana_indexes: docker.io/openstackhelm/heat:newton-ubuntu_xenial
   pull_policy: IfNotPresent
   local_registry:
     active: false
@@ -34,12 +35,32 @@ images:
       - image_repo_sync
 
 pod:
+  security_context:
+    dashboard:
+      pod:
+        runAsUser: 999
+      container:
+        apache_proxy:
+          runAsUser: 0
+          readOnlyRootFilesystem: false
+        kibana:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+    register_kibana_indexes:
+      pod:
+        runAsUser: 999
+      container:
+        register_kibana_indexes:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
   affinity:
     anti:
       type:
         default: preferredDuringSchedulingIgnoredDuringExecution
       topologyKey:
         default: kubernetes.io/hostname
+      weight:
+        default: 10
   lifecycle:
     upgrades:
       deployments:
@@ -74,6 +95,20 @@ pod:
         limits:
           memory: "1024Mi"
           cpu: "2000m"
+      register_kibana_indexes:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+
+network_policy:
+  kibana:
+    ingress:
+      - {}
+    egress:
+      - {}
 
 secrets:
   elasticsearch:
@@ -101,6 +136,10 @@ dependencies:
       services:
         - endpoint: internal
           service: elasticsearch
+    register_kibana_indexes:
+      services:
+        - endpoint: internal
+          service: kibana
 
 conf:
   httpd: |
@@ -131,6 +170,7 @@ conf:
     LoadModule proxy_connect_module modules/mod_proxy_connect.so
     LoadModule proxy_http_module modules/mod_proxy_http.so
     LoadModule proxy_balancer_module modules/mod_proxy_balancer.so
+    LoadModule remoteip_module modules/mod_remoteip.so
     LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
     LoadModule slotmem_plain_module modules/mod_slotmem_plain.so
     LoadModule unixd_module modules/mod_unixd.so
@@ -156,16 +196,18 @@ conf:
     LogLevel warn
 
     <IfModule log_config_module>
-        LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+        LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" proxy
         LogFormat "%h %l %u %t \"%r\" %>s %b" common
 
         <IfModule logio_module>
-          LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+          LogFormat "%a %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
         </IfModule>
 
+        SetEnvIf X-Forwarded-For "^.*\..*\..*\..*" forwarded
         CustomLog /dev/stdout common
-
         CustomLog /dev/stdout combined
+        CustomLog /dev/stdout proxy env=forwarded
     </IfModule>
 
     <Directory "/usr/local/apache2/cgi-bin">
@@ -183,6 +225,7 @@ conf:
     </IfModule>
 
     <VirtualHost *:80>
+      RemoteIPHeader X-Original-Forwarded-For
       <Location />
           ProxyPass http://localhost:{{ tuple "kibana" "internal" "kibana" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
           ProxyPassReverse http://localhost:{{ tuple "kibana" "internal" "kibana" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}/
@@ -220,6 +263,14 @@ conf:
       port: 5601
       ssl:
         enabled: false
+  create_kibana_indexes:
+    enabled: true
+    indexes:
+      - logstash
+      - openstack
+      - journal
+      - kernel
+    default_index: logstash
 
 endpoints:
   cluster_domain_suffix: cluster.local
@@ -304,6 +355,11 @@ network:
         cluster: "nginx-cluster"
       annotations:
         nginx.ingress.kubernetes.io/rewrite-target: /
+        nginx.ingress.kubernetes.io/affinity: cookie
+        nginx.ingress.kubernetes.io/session-cookie-name: kube-ingress-session-kibana
+        nginx.ingress.kubernetes.io/session-cookie-hash: sha1
+        nginx.ingress.kubernetes.io/session-cookie-expires: "600"
+        nginx.ingress.kubernetes.io/session-cookie-max-age: "600"
     node_port:
       enabled: false
       port: 30905
@@ -315,7 +371,9 @@ manifests:
   deployment: true
   ingress: true
   job_image_repo_sync: true
+  network_policy: false
   secret_elasticsearch: true
   secret_ingress_tls: true
   service: true
   service_ingress: true
+  job_register_kibana_indexes: true
