@@ -55,8 +55,8 @@ logger.info("This instance number: {0}".format(instance_number))
 
 # Setup k8s client credentials and check api version
 kubernetes.config.load_incluster_config()
-kubernetes_version = kubernetes.client.VersionApi().get_code().git_version
-logger.info("Kubernetes API Version: {0}".format(kubernetes_version))
+#kubernetes_version = kubernetes.client.VersionApi().get_code().git_version
+#logger.info("Kubernetes API Version: {0}".format(kubernetes_version))
 k8s_api_instance = kubernetes.client.CoreV1Api()
 
 
