@@ -21,6 +21,7 @@ COMMAND="${@:-start}"
 
 function start () {
   rm -fv /tmp/prometheus-nginx.socket
+  rm -fv /tmp/*.sock
   exec /usr/bin/dumb-init \
       /nginx-ingress-controller \
       {{- if eq .Values.deployment.mode "namespace" }}
