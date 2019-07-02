@@ -19,8 +19,7 @@ set -ex
 COMMAND="${@:-start}"
 
 function start () {
-  grafana-cli plugins install grafana-kubernetes-app
-  exec /usr/share/grafana/bin/grafana-server -homepath=/usr/share/grafana -config=/etc/grafana/grafana.ini
+  exec /usr/sbin/grafana-server -homepath=/usr/share/grafana -config=/etc/grafana/grafana.ini
 }
 
 function stop () {
